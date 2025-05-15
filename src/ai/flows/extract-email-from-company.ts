@@ -19,8 +19,8 @@ export type ExtractEmailFromCompanyInput = z.infer<typeof ExtractEmailFromCompan
 
 const ExtractEmailFromCompanyOutputSchema = z.object({
   emailAddresses: z
-    .array(z.string().email())
-    .describe('The extracted email addresses associated with the company.'),
+    .array(z.string()) // Removed .email()
+    .describe('The extracted email addresses associated with the company. Each string should be a valid email format.'),
   reasoning: z.string().optional().describe('The reasoning behind the extracted emails.'),
 });
 export type ExtractEmailFromCompanyOutput = z.infer<typeof ExtractEmailFromCompanyOutputSchema>;
