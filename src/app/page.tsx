@@ -1,10 +1,11 @@
+
 "use client";
 
 import * as React from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import * as z from "zod";
-import { Building2, Search, Loader2, AlertCircle, Mail, ClipboardCopy, Briefcase } from "lucide-react";
+import { Building2, Search, Loader2, AlertCircle, Mail, ClipboardCopy, Briefcase, Copy, XCircle } from "lucide-react"; // Changed CopyAll to Copy
 
 import { Button } from "@/components/ui/button";
 import {
@@ -16,7 +17,7 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
 import { findEmailsByCriteria, type FindEmailsByCriteriaOutput } from "@/ai/flows/find-emails-by-criteria";
@@ -42,6 +43,8 @@ export default function ContactFinderAIPage() {
     },
   });
 
+  const searchCriteriaValue = form.watch("searchCriteria");
+
   async function onSubmit(values: FormValues) {
     setIsLoading(true);
     setError(null);
@@ -54,6 +57,13 @@ export default function ContactFinderAIPage() {
         toast({
           title: "No Contacts Found",
           description: "We couldn't find any email addresses for the provided criteria.",
+          variant: "default",
+        });
+      } else {
+        toast({
+          title: "Contacts Found!",
+          description: `Found ${result.emailAddresses.length} email address(es).`,
+          variant: "default",
         });
       }
     } catch (err) {
@@ -88,6 +98,37 @@ export default function ContactFinderAIPage() {
       });
   };
 
+  const handleCopyAllEmails = () => {
+    if (searchResult && searchResult.emailAddresses.length > 0) {
+      const allEmails = searchResult.emailAddresses.join("\n");
+      navigator.clipboard.writeText(allEmails)
+        .then(() => {
+          toast({
+            title: "All Copied!",
+            description: `${searchResult.emailAddresses.length} email addresses copied to clipboard.`,
+          });
+        })
+        .catch(err => {
+          console.error("Failed to copy all emails:", err);
+          toast({
+            variant: "destructive",
+            title: "Copy Failed",
+            description: "Could not copy all emails to clipboard.",
+          });
+        });
+    }
+  };
+
+  const handleClearAll = () => {
+    form.reset({ searchCriteria: "" });
+    setSearchResult(null);
+    setError(null);
+    toast({
+      title: "Cleared",
+      description: "Search input and results have been cleared.",
+    });
+  };
+
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-4 sm:p-6 lg:p-8 selection:bg-accent selection:text-accent-foreground">
       <header className="mb-8 text-center">
@@ -117,26 +158,54 @@ export default function ContactFinderAIPage() {
                   <FormItem>
                     <FormLabel htmlFor="searchCriteriaInput" className="text-base">Profession, Industry, or Work Aspect</FormLabel>
                     <FormControl>
-                      <Input 
-                        id="searchCriteriaInput"
-                        placeholder="e.g., 'AI startups', 'plumbers in San Francisco', 'sustainable energy companies'" 
-                        {...field}
-                        className="text-base py-3 px-4"
-                        aria-label="Profession, Industry, or Work Aspect"
-                      />
+                      <div className="relative">
+                        <Input 
+                          id="searchCriteriaInput"
+                          placeholder="e.g., 'AI startups', 'plumbers in San Francisco', 'sustainable energy companies'" 
+                          {...field}
+                          className="text-base py-3 px-4 pr-10" // Added pr-10 for clear button spacing
+                          aria-label="Profession, Industry, or Work Aspect"
+                        />
+                        {searchCriteriaValue && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7 text-muted-foreground hover:text-destructive"
+                            onClick={() => form.setValue('searchCriteria', '')}
+                            aria-label="Clear search input"
+                          >
+                            <XCircle className="h-5 w-5" />
+                          </Button>
+                        )}
+                      </div>
                     </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
               />
-              <Button type="submit" className="w-full text-base py-3" disabled={isLoading}>
-                {isLoading ? (
-                  <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                ) : (
-                  <Search className="mr-2 h-5 w-5" />
+              <div className="flex flex-col sm:flex-row gap-3">
+                <Button type="submit" className="w-full text-base py-3" disabled={isLoading}>
+                  {isLoading ? (
+                    <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                  ) : (
+                    <Search className="mr-2 h-5 w-5" />
+                  )}
+                  Find Contacts
+                </Button>
+                {(searchCriteriaValue || searchResult || error) && (
+                   <Button 
+                    type="button" 
+                    variant="outline" 
+                    className="w-full sm:w-auto text-base py-3" 
+                    onClick={handleClearAll}
+                    disabled={isLoading}
+                  >
+                    <XCircle className="mr-2 h-5 w-5" />
+                    Clear All
+                  </Button>
                 )}
-                Find Contacts
-              </Button>
+              </div>
             </form>
           </Form>
         </CardContent>
@@ -159,12 +228,26 @@ export default function ContactFinderAIPage() {
 
       {searchResult && !isLoading && !error && (
         <Card className="mt-8 w-full max-w-2xl shadow-xl">
-          <CardHeader>
-            <CardTitle className="text-2xl">Found Contacts</CardTitle>
-            {searchResult.reasoning && (
-              <CardDescription className="italic text-sm pt-1">
-                 {searchResult.reasoning}
-              </CardDescription>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <div>
+              <CardTitle className="text-2xl">Found Contacts</CardTitle>
+              {searchResult.reasoning && (
+                <CardDescription className="italic text-sm pt-1">
+                  {searchResult.reasoning}
+                </CardDescription>
+              )}
+            </div>
+            {searchResult.emailAddresses.length > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleCopyAllEmails}
+                className="ml-auto"
+                aria-label="Copy all found email addresses"
+              >
+                <Copy className="mr-2 h-4 w-4" /> {/* Changed CopyAll to Copy */}
+                Copy All
+              </Button>
             )}
           </CardHeader>
           <CardContent>
@@ -174,13 +257,13 @@ export default function ContactFinderAIPage() {
                   <li key={index} className="flex items-center justify-between p-3 bg-secondary/50 rounded-md">
                     <div className="flex items-center">
                       <Mail className="h-5 w-5 mr-3 text-primary" />
-                      <span className="text-base text-foreground">{email}</span>
+                      <span className="text-base text-foreground break-all">{email}</span>
                     </div>
                     <Button
                       variant="ghost"
                       size="icon"
                       onClick={() => handleCopyEmail(email)}
-                      className="text-muted-foreground hover:text-accent"
+                      className="text-muted-foreground hover:text-accent ml-2 shrink-0"
                       aria-label={`Copy email ${email}`}
                     >
                       <ClipboardCopy className="h-5 w-5" />
