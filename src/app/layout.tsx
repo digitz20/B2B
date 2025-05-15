@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({ // Corrected initialization
 });
 
 export const metadata: Metadata = {
-  title: 'ProspectorAI',
-  description: 'Find B2B email addresses with AI',
+  title: 'ContactFinder AI',
+  description: 'Discover B2B email addresses by profession or industry with AI',
 };
 
 export default function RootLayout({

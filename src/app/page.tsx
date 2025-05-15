@@ -4,7 +4,7 @@ import * as React from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import * as z from "zod";
-import { Building2, Search, Loader2, AlertCircle, Mail, ClipboardCopy } from "lucide-react";
+import { Building2, Search, Loader2, AlertCircle, Mail, ClipboardCopy, Briefcase } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -19,51 +19,51 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
-import { extractEmailFromCompany, type ExtractEmailFromCompanyOutput } from "@/ai/flows/extract-email-from-company";
+import { findEmailsByCriteria, type FindEmailsByCriteriaOutput } from "@/ai/flows/find-emails-by-criteria";
 
 const formSchema = z.object({
-  companyInfo: z.string().min(3, {
-    message: "Company name or website URL must be at least 3 characters.",
+  searchCriteria: z.string().min(3, {
+    message: "Search criteria must be at least 3 characters.",
   }),
 });
 
 type FormValues = z.infer<typeof formSchema>;
 
-export default function ProspectorAIPage() {
+export default function ContactFinderAIPage() {
   const [isLoading, setIsLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const [extractionResult, setExtractionResult] = React.useState<ExtractEmailFromCompanyOutput | null>(null);
+  const [searchResult, setSearchResult] = React.useState<FindEmailsByCriteriaOutput | null>(null);
   const { toast } = useToast();
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      companyInfo: "",
+      searchCriteria: "",
     },
   });
 
   async function onSubmit(values: FormValues) {
     setIsLoading(true);
     setError(null);
-    setExtractionResult(null);
+    setSearchResult(null);
 
     try {
-      const result = await extractEmailFromCompany({ companyInfo: values.companyInfo });
-      setExtractionResult(result);
+      const result = await findEmailsByCriteria({ searchCriteria: values.searchCriteria });
+      setSearchResult(result);
       if (result.emailAddresses.length === 0) {
         toast({
-          title: "No Emails Found",
-          description: "We couldn't find any email addresses for the provided company.",
+          title: "No Contacts Found",
+          description: "We couldn't find any email addresses for the provided criteria.",
         });
       }
     } catch (err) {
-      console.error("Error extracting emails:", err);
+      console.error("Error finding contacts:", err);
       const errorMessage = err instanceof Error ? err.message : "An unexpected error occurred.";
       setError(errorMessage);
       toast({
         variant: "destructive",
         title: "Error",
-        description: `Failed to extract emails: ${errorMessage}`,
+        description: `Failed to find contacts: ${errorMessage}`,
       });
     } finally {
       setIsLoading(false);
@@ -92,19 +92,19 @@ export default function ProspectorAIPage() {
     <div className="min-h-screen flex flex-col items-center justify-center p-4 sm:p-6 lg:p-8 selection:bg-accent selection:text-accent-foreground">
       <header className="mb-8 text-center">
         <div className="flex items-center justify-center mb-2">
-          <Building2 className="h-12 w-12 mr-3 text-primary" />
-          <h1 className="text-4xl font-bold tracking-tight text-primary">ProspectorAI</h1>
+          <Briefcase className="h-12 w-12 mr-3 text-primary" />
+          <h1 className="text-4xl font-bold tracking-tight text-primary">ContactFinder AI</h1>
         </div>
         <p className="text-lg text-muted-foreground">
-          Find B2B email addresses with the power of AI.
+          Discover B2B email addresses by profession or industry using AI.
         </p>
       </header>
 
       <Card className="w-full max-w-2xl shadow-xl">
         <CardHeader>
-          <CardTitle className="text-2xl">Enter Company Details</CardTitle>
+          <CardTitle className="text-2xl">Find Business Contacts</CardTitle>
           <CardDescription>
-            Provide a company name or website URL to find associated email addresses.
+            Enter a profession, industry, or work aspect to find relevant email addresses.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -112,17 +112,17 @@ export default function ProspectorAIPage() {
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
               <FormField
                 control={form.control}
-                name="companyInfo"
+                name="searchCriteria"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel htmlFor="companyInfoInput" className="text-base">Company Name or Website URL</FormLabel>
+                    <FormLabel htmlFor="searchCriteriaInput" className="text-base">Profession, Industry, or Work Aspect</FormLabel>
                     <FormControl>
                       <Input 
-                        id="companyInfoInput"
-                        placeholder="e.g., example.com or Example Inc." 
+                        id="searchCriteriaInput"
+                        placeholder="e.g., 'AI startups', 'plumbers in San Francisco', 'sustainable energy companies'" 
                         {...field}
                         className="text-base py-3 px-4"
-                        aria-label="Company Name or Website URL"
+                        aria-label="Profession, Industry, or Work Aspect"
                       />
                     </FormControl>
                     <FormMessage />
@@ -135,7 +135,7 @@ export default function ProspectorAIPage() {
                 ) : (
                   <Search className="mr-2 h-5 w-5" />
                 )}
-                Find Emails
+                Find Contacts
               </Button>
             </form>
           </Form>
@@ -145,7 +145,7 @@ export default function ProspectorAIPage() {
       {isLoading && (
         <div className="mt-8 flex flex-col items-center text-muted-foreground">
           <Loader2 className="h-12 w-12 animate-spin text-primary mb-3" />
-          <p className="text-lg">Searching for emails...</p>
+          <p className="text-lg">Searching for contacts...</p>
         </div>
       )}
 
@@ -157,20 +157,20 @@ export default function ProspectorAIPage() {
         </Alert>
       )}
 
-      {extractionResult && !isLoading && !error && (
+      {searchResult && !isLoading && !error && (
         <Card className="mt-8 w-full max-w-2xl shadow-xl">
           <CardHeader>
-            <CardTitle className="text-2xl">Extracted Emails</CardTitle>
-            {extractionResult.reasoning && (
+            <CardTitle className="text-2xl">Found Contacts</CardTitle>
+            {searchResult.reasoning && (
               <CardDescription className="italic text-sm pt-1">
-                 {extractionResult.reasoning}
+                 {searchResult.reasoning}
               </CardDescription>
             )}
           </CardHeader>
           <CardContent>
-            {extractionResult.emailAddresses.length > 0 ? (
+            {searchResult.emailAddresses.length > 0 ? (
               <ul className="space-y-3">
-                {extractionResult.emailAddresses.map((email, index) => (
+                {searchResult.emailAddresses.map((email, index) => (
                   <li key={index} className="flex items-center justify-between p-3 bg-secondary/50 rounded-md">
                     <div className="flex items-center">
                       <Mail className="h-5 w-5 mr-3 text-primary" />
@@ -190,7 +190,7 @@ export default function ProspectorAIPage() {
               </ul>
             ) : (
               <p className="text-base text-center text-muted-foreground py-4">
-                No email addresses found for the provided company.
+                No email addresses found for the provided criteria.
               </p>
             )}
           </CardContent>

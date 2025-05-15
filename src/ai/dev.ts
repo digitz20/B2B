@@ -1,4 +1,4 @@
 import { config } from 'dotenv';
 config();
 
-import '@/ai/flows/extract-email-from-company.ts';
+import '@/ai/flows/find-emails-by-criteria.ts';
