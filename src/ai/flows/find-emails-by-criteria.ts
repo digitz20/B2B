@@ -33,13 +33,14 @@ const findEmailsByCriteriaPrompt = ai.definePrompt({
   name: 'findEmailsByCriteriaPrompt',
   input: {schema: FindEmailsByCriteriaInputSchema},
   output: {schema: FindEmailsByCriteriaOutputSchema},
-  prompt: `You are an expert research assistant. Your task is to find publicly listed email addresses for companies related to a given search criteria (e.g., profession, industry, or work aspect).
+  prompt: `You are an expert research assistant. Your task is to find a comprehensive list of publicly listed email addresses for a diverse range of companies related to a given search criteria (e.g., profession, industry, or work aspect).
 
 Search Criteria: {{{searchCriteria}}}
 
-Based on this, identify several relevant companies. Then, for each company, find one or more potential contact email addresses.
-Return all found email addresses as a flat list in the 'emailAddresses' field.
-In the 'reasoning' field, provide a summary explaining which companies the emails belong to and how they are relevant to the search_criteria. If no emails are found, explain why.
+Based on this, identify several relevant companies, aiming for variety. Then, for each company, find one or more potential contact email addresses.
+Prioritize finding multiple contacts if possible.
+Return all found email addresses as a flat list in the 'emailAddresses' field. Aim for a substantial number of contacts.
+In the 'reasoning' field, provide a summary explaining which companies the emails belong to, how they are relevant to the search_criteria, and any limitations encountered. If no emails are found for certain companies or overall, explain why.
 Ensure the email addresses are valid and properly formatted.
   `,
 });
