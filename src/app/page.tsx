@@ -191,6 +191,24 @@ export default function ContactFinderAIPage() {
       description: "Text input and results for 'Extract Emails' have been cleared.",
     });
   };
+
+  const handleClearFindResultsOnly = () => {
+    setFindContactsResult(null);
+    setError(null);
+    toast({
+      title: "Results Cleared",
+      description: "Search results for 'Find Contacts' have been cleared.",
+    });
+  };
+
+  const handleClearExtractionResultsOnly = () => {
+    setExtractionResult(null);
+    setError(null);
+    toast({
+      title: "Results Cleared",
+      description: "Extraction results for 'Extract Emails' have been cleared.",
+    });
+  };
   
   const renderEmailList = (emails: string[]) => {
     return (
@@ -388,8 +406,8 @@ export default function ContactFinderAIPage() {
       {/* Results for Find Contacts */}
       {activeTab === "find" && findContactsResult && !isLoading && !error && (
         <Card className="mt-8 w-full max-w-2xl shadow-xl">
-          <CardHeader className="flex flex-row items-center justify-between">
-            <div>
+          <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+            <div className="flex-grow">
               <CardTitle className="text-2xl">Found Contacts</CardTitle>
               {findContactsResult.reasoning && (
                 <CardDescription className="italic text-sm pt-1">
@@ -397,18 +415,28 @@ export default function ContactFinderAIPage() {
                 </CardDescription>
               )}
             </div>
-            {findContactsResult.emailAddresses.length > 0 && (
+            <div className="flex gap-2 mt-2 sm:mt-0 self-start sm:self-center">
+              {findContactsResult.emailAddresses.length > 0 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleCopyAllEmails(findContactsResult.emailAddresses)}
+                  aria-label="Copy all found email addresses"
+                >
+                  <Copy className="mr-2 h-4 w-4" />
+                  Copy All
+                </Button>
+              )}
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => handleCopyAllEmails(findContactsResult.emailAddresses)}
-                className="ml-auto"
-                aria-label="Copy all found email addresses"
+                onClick={handleClearFindResultsOnly}
+                aria-label="Clear search results"
               >
-                <Copy className="mr-2 h-4 w-4" />
-                Copy All
+                <XCircle className="mr-2 h-4 w-4" />
+                Clear Results
               </Button>
-            )}
+            </div>
           </CardHeader>
           <CardContent>
             {findContactsResult.emailAddresses.length > 0 ? (
@@ -425,8 +453,8 @@ export default function ContactFinderAIPage() {
       {/* Results for Extract Emails */}
       {activeTab === "extract" && extractionResult && !isLoading && !error && (
         <Card className="mt-8 w-full max-w-2xl shadow-xl">
-          <CardHeader className="flex flex-row items-center justify-between">
-            <div>
+          <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+            <div className="flex-grow">
               <CardTitle className="text-2xl">Extraction Result</CardTitle>
               {extractionResult.extractionSummary && (
                 <CardDescription className="italic text-sm pt-1">
@@ -434,18 +462,28 @@ export default function ContactFinderAIPage() {
                 </CardDescription>
               )}
             </div>
-            {extractionResult.extractedEmails.length > 0 && (
+            <div className="flex gap-2 mt-2 sm:mt-0 self-start sm:self-center">
+              {extractionResult.extractedEmails.length > 0 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleCopyAllEmails(extractionResult.extractedEmails)}
+                  aria-label="Copy all extracted email addresses"
+                >
+                  <Copy className="mr-2 h-4 w-4" />
+                  Copy All
+                </Button>
+              )}
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => handleCopyAllEmails(extractionResult.extractedEmails)}
-                className="ml-auto"
-                aria-label="Copy all extracted email addresses"
+                onClick={handleClearExtractionResultsOnly}
+                aria-label="Clear extraction results"
               >
-                <Copy className="mr-2 h-4 w-4" />
-                Copy All
+                <XCircle className="mr-2 h-4 w-4" />
+                Clear Results
               </Button>
-            )}
+            </div>
           </CardHeader>
           <CardContent>
             {extractionResult.extractedEmails.length > 0 ? (
