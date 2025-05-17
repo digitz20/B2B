@@ -39,13 +39,13 @@ const findEmailsByCriteriaPrompt = ai.definePrompt({
 Search Criteria: {{{searchCriteria}}}
 
 Your process should be:
-1.  **Think Expansively**: Identify a very large and diverse set of companies **and individual professionals** highly relevant to the 'searchCriteria'. Do not limit yourself to obvious matches. If the core criteria is narrow, explore broadly into related, adjacent, or supporting industries, roles, and professional communities that would still be valuable to someone interested in the 'searchCriteria'. The goal is to maximize the number of potential contacts.
+1.  **Think Expansively**: Identify a very large and diverse set of companies **and individual professionals** highly relevant to the 'searchCriteria'. Do not limit yourself to obvious matches. If the core criteria is narrow, explore broadly into related, adjacent, or supporting industries, roles, and professional communities (including online forums, professional social media profiles where emails are publicly listed, and public directories) that would still be valuable to someone interested in the 'searchCriteria'. The goal is to maximize the number of potential contacts.
 2.  **Exhaustive Email Search**: For each identified company or individual professional, diligently search for multiple publicly available contact email addresses. This can include:
     *   Business email addresses (e.g., \`name@company.com\`, \`info@company.com\`, \`sales@department.com\`).
-    *   Personal-style email addresses (e.g., from providers like Gmail, Outlook.com, Yahoo, etc.) **only if they are publicly listed by individuals in direct relation to their professional activities, services, or public profile relevant to the search criteria.** Do not invent or assume personal emails.
+    *   Personal-style email addresses (e.g., from providers like Gmail, Outlook.com, Yahoo, etc.) **only if they are publicly listed by individuals in direct relation to their professional activities, services, or public profile (like a personal website, portfolio, or professional social media page where the email is openly shared) relevant to the search criteria.** Do not invent or assume personal emails.
 3.  **Compile Results**: Compile all found, publicly listed email addresses into a single, flat list in the 'emailAddresses' field.
 4.  **Detailed Reasoning**: In the 'reasoning' field, provide:
-    *   A summary of the types of companies, roles, and individuals targeted.
+    *   A summary of the types of companies, roles, and individuals targeted, and the types of sources considered (e.g., company websites, professional directories, public social media profiles).
     *   If the 'searchCriteria' was narrow, explain how you broadened the search to related or adjacent fields/professions to achieve a high volume of contacts.
     *   An acknowledgement of the number of email addresses found.
     *   If the target of 1000+ emails was not met, explain the primary limitations encountered (e.g., genuine scarcity of publicly available information for the specific criteria even after broadening, niche industry).
