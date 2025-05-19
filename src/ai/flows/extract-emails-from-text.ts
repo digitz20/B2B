@@ -33,8 +33,8 @@ const extractEmailsPrompt = ai.definePrompt({
   input: {schema: ExtractEmailsFromTextInputSchema},
   output: {schema: z.object({
     extractedEmails: z.array(z.string()).describe('A list of email addresses found in the text. These will be verified separately.').default([]),
-    originalTextCharacterCount: z.number().describe('The total number of characters in the original input text block.'),
-    extractionSummary: z.string().describe('A brief summary of the initial extraction process before verification.'),
+    originalTextCharacterCount: z.number().optional().describe('The total number of characters in the original input text block.'),
+    extractionSummary: z.string().optional().describe('A brief summary of the initial extraction process before verification.'),
   })},
   prompt: `You are an email extraction specialist.
 Your task is to meticulously parse the provided text block and identify all strings that appear to be email addresses.
@@ -150,3 +150,4 @@ const extractEmailsFromTextFlow = ai.defineFlow(
     }
   }
 );
+
