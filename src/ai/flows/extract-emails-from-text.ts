@@ -62,8 +62,7 @@ const extractEmailsFromTextFlow = ai.defineFlow(
     try {
       const llmResponse = await extractEmailsPrompt(input);
       
-      // Fallback values if llmResponse.output or its properties are undefined
-      const fallbackCharCount = input.textBlock.length;
+      const fallbackCharCount = input?.textBlock?.length || 0;
       const fallbackInitialSummary = `Character count: ${fallbackCharCount}.`;
 
       if (!llmResponse.output) {
@@ -142,11 +141,11 @@ const extractEmailsFromTextFlow = ai.defineFlow(
         extractionSummary: finalSummary,
       };
     } catch (error) {
-      console.error('Unexpected error in extractEmailsFromTextFlow:', error);
+      console.error('CRITICAL_ERROR in extractEmailsFromTextFlow:', error instanceof Error ? error.stack : String(error));
       return {
         extractedEmails: [],
-        originalTextCharacterCount: input.textBlock.length,
-        extractionSummary: `An unexpected error occurred while extracting emails: ${error instanceof Error ? error.message : 'Unknown error'}. Please check server logs.`,
+        originalTextCharacterCount: input?.textBlock?.length || 0,
+        extractionSummary: 'A critical server error occurred. Please check server logs or try again later.',
       };
     }
   }

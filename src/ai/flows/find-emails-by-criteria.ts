@@ -44,7 +44,7 @@ const findEmailsByCriteriaPrompt = ai.definePrompt({
 Search Criteria: {{{searchCriteria}}}
 
 Your process should be:
-1.  **Think Expansively**: Identify a very large and diverse set of companies **and individual professionals** highly relevant to the 'searchCriteria'. Do not limit yourself to obvious matches. If the core criteria is narrow, explore broadly into related, adjacent, or supporting industries, roles, and professional communities (including online forums, professional social media profiles where emails are publicly listed such as LinkedIn, and public directories) that would still be valuable to someone interested in the 'searchCriteria'. Consider less direct but still plausible connections if it helps to achieve the volume target. The goal is to maximize the number of potential contacts.
+1.  **Think Expansively**: Identify a very large and diverse set of companies **and individual professionals** highly relevant to the 'searchCriteria'. Do not limit yourself to obvious matches. If the core criteria is narrow, explore broadly into related, adjacent, or supporting industries, roles, and professional communities (including online forums, professional social media profiles where emails are publicly listed such as LinkedIn, public directories, and personal portfolio websites) that would still be valuable to someone interested in the 'searchCriteria'. Consider less direct but still plausible connections if it helps to achieve the volume target. The goal is to maximize the number of potential contacts.
 2.  **Exhaustive Email Search**: For each identified company or individual professional, diligently search for multiple publicly available contact email addresses. This can include:
     *   Business email addresses (e.g., \`name@company.com\`, \`info@company.com\`, \`sales@department.com\`).
     *   Personal-style email addresses (e.g., from providers like Gmail, Outlook.com, Yahoo, etc.) **only if they are publicly listed by individuals in direct relation to their professional activities, services, or public profile (like a personal website, portfolio, or professional social media page where the email is openly shared) relevant to the search criteria.** Do not invent or assume personal emails.
@@ -141,10 +141,10 @@ const findEmailsByCriteriaFlow = ai.defineFlow(
         reasoning: finalReasoning,
       };
     } catch (error) {
-      console.error('Unexpected error in findEmailsByCriteriaFlow:', error);
+      console.error('CRITICAL_ERROR in findEmailsByCriteriaFlow:', error instanceof Error ? error.stack : String(error));
       return {
         emailAddresses: [],
-        reasoning: `An unexpected error occurred while finding emails: ${error instanceof Error ? error.message : 'Unknown error'}. Please check server logs.`,
+        reasoning: 'A critical server error occurred. Please check server logs or try again later.',
       };
     }
   }
