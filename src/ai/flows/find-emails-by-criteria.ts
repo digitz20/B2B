@@ -26,7 +26,7 @@ export type FindEmailsByCriteriaInput = z.infer<typeof FindEmailsByCriteriaInput
 
 const FindEmailsByCriteriaOutputSchema = z.object({
   emailAddresses: z
-    .array(z.string().email())
+    .array(z.string()) // Emails will be strings, validation happens via NeverBounce
     .describe('The VERIFIED email addresses. Each string should be a valid email format. Max 30 emails.'),
   reasoning: z.string().optional().describe("Explanation of companies identified, emails suggested by AI, emails found via Apollo.io, and validation results from NeverBounce. Includes if results were capped at 30 validated emails."),
 });
@@ -67,7 +67,7 @@ If you achieve a target of over 1000 potential contacts, please indicate this in
 });
 
 const MAX_VALIDATED_EMAILS_TO_RETURN = 30;
-const MAX_EMAILS_PER_DOMAIN_FROM_APOLLO = 5; // How many emails to try and fetch per domain from Apollo
+const MAX_EMAILS_PER_DOMAIN_FROM_APOLLO = 5;
 
 const findEmailsByCriteriaFlow = ai.defineFlow(
   {
@@ -81,8 +81,9 @@ const findEmailsByCriteriaFlow = ai.defineFlow(
     let identifiedCompanyCount = 0;
     let totalAISuggestedEmails = 0;
     let totalApolloEmailsFound = 0;
-    let apolloToolErrors = 0;
-    let validationToolError = false;
+    let apolloToolErrorCount = 0;
+    let apolloApiKeyIssueDetected = false;
+    let validationToolError = false; // Flag for NeverBounce issues
 
     try {
       // Step 1: Use LLM to identify relevant companies and suggest initial emails
@@ -115,27 +116,39 @@ const findEmailsByCriteriaFlow = ai.defineFlow(
       const apolloPromises = companiesFromLLM.map(company => 
         findApolloEmailsTool({ domain: company.domain, maxEmailsPerDomain: MAX_EMAILS_PER_DOMAIN_FROM_APOLLO })
           .catch(e => {
-            console.error(`Error calling findApolloEmailsTool for ${company.domain}:`, e);
-            apolloToolErrors++;
-            return { domain: company.domain, emails: [], error: e instanceof Error ? e.message : "Unknown tool error" } as FindApolloEmailsOutput;
+            console.error(`Critical error invoking findApolloEmailsTool for ${company.domain}:`, e);
+            // This specific error is for unexpected tool invocation failures, not API key issues handled by the tool itself.
+            return { domain: company.domain, emails: [], error: `Tool invocation failed: ${e instanceof Error ? e.message : "Unknown tool error"}` } as FindApolloEmailsOutput;
           })
       );
       
       const apolloResults = await Promise.all(apolloPromises);
 
       apolloResults.forEach(result => {
-        if (result.emails && result.emails.length > 0) { // Added null check for result.emails
+        if (result.emails && result.emails.length > 0) {
           allPotentialEmailsFromApollo.push(...result.emails);
           totalApolloEmailsFound += result.emails.length;
         }
         if (result.error) {
-            console.warn(`Apollo.io tool error for domain ${result.domain}: ${result.error}`);
+            apolloToolErrorCount++;
+            console.warn(`Apollo.io tool for domain ${result.domain} reported error: ${result.error}`);
+            // Check for keywords indicating API key or auth issues
+            const lowerError = result.error.toLowerCase();
+            if (lowerError.includes('api key') || lowerError.includes('unconfigured') || lowerError.includes('unauthorized') || lowerError.includes('forbidden')) {
+                apolloApiKeyIssueDetected = true;
+            }
         }
       });
       
       reasoningSteps.push(`Apollo.io found an additional ${totalApolloEmailsFound} potential email(s) for these ${identifiedCompanyCount} domains.`);
-      if (apolloToolErrors > 0) {
-        reasoningSteps.push(`${apolloToolErrors} domain(s) encountered errors during Apollo.io search.`);
+      if (apolloToolErrorCount > 0) {
+        let apolloErrorMsg = `${apolloToolErrorCount} domain(s) encountered issues during Apollo.io email search.`;
+        if (apolloApiKeyIssueDetected) {
+            apolloErrorMsg += ` This may indicate an Apollo.io API key configuration problem (e.g., missing, invalid, or unauthorized key). Please verify APOLLO_API_KEY in your .env file and check server logs.`;
+        } else {
+            apolloErrorMsg += ` Check server logs for more details on Apollo.io tool errors.`;
+        }
+        reasoningSteps.push(apolloErrorMsg);
       }
 
       // Combine emails from AI and Apollo
@@ -149,8 +162,7 @@ const findEmailsByCriteriaFlow = ai.defineFlow(
         };
       }
       
-      // Remove duplicates before validation
-      const uniquePotentialEmails = Array.from(new Set(combinedPotentialEmails.filter(email => typeof email === 'string' && email.trim() !== ''))); // Filter out non-strings or empty strings
+      const uniquePotentialEmails = Array.from(new Set(combinedPotentialEmails.filter(email => typeof email === 'string' && email.trim() !== '')));
       reasoningSteps.push(`Combined to ${uniquePotentialEmails.length} unique potential emails for validation.`);
 
       // Step 3: Validate all unique emails using NeverBounce (via validateEmailTool)
@@ -164,7 +176,7 @@ const findEmailsByCriteriaFlow = ai.defineFlow(
           validateEmailTool({ email })
             .catch(e => {
               console.error(`Critical error during validateEmailTool call for ${email}:`, e);
-              validationToolError = true;
+              validationToolError = true; // General validation tool error
               return {
                 email: email,
                 status: 'error_tool_invocation_failed',
@@ -182,7 +194,7 @@ const findEmailsByCriteriaFlow = ai.defineFlow(
       }
       
       for (const result of validatedEmailResults) {
-        if (result.status === 'valid' && result.email) { // ensure result.email is present
+        if (result.status === 'valid' && result.email) {
           allVerifiedEmails.push(result.email);
         } else if (
           result.status === 'error_api_key_missing' ||
@@ -191,7 +203,7 @@ const findEmailsByCriteriaFlow = ai.defineFlow(
           result.status === 'error_rate_limited'
         ) {
           console.warn(`Email validation for ${result.email} resulted in status '${result.status}': ${result.sub_status}`);
-          validationToolError = true;
+          validationToolError = true; // Specific validation error for NeverBounce
         }
       }
       
@@ -206,7 +218,7 @@ const findEmailsByCriteriaFlow = ai.defineFlow(
       }
 
       if (validationToolError) {
-          reasoningSteps.push(`Some email validations may have been skipped or failed due to NeverBounce API issues (e.g., misconfigured API key, service error, or tool invocation problem). Check server logs.`);
+          reasoningSteps.push(`Some email validations by NeverBounce may have failed or been skipped. This could be due to NeverBounce API issues (e.g., misconfigured/invalid API key, service error, rate limits, or tool invocation problem). Please verify NEVERBOUNCE_API_KEY in your .env file and check server logs for detailed error messages from NeverBounce.`);
       }
 
       return {
