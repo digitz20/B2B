@@ -5,7 +5,6 @@
  * It uses an LLM to identify relevant company domains and suggest initial emails.
  * Then, it uses Apollo.io (via a tool) to find additional emails for those domains.
  * Finally, it performs a basic format check on all found emails.
- * Returns a maximum of 30 validated emails.
  *
  * - findEmailsByCriteria - A function that handles the email finding and validation process.
  * - FindEmailsByCriteriaInput - The input type for the findEmailsByCriteria function.
@@ -27,8 +26,8 @@ export type FindEmailsByCriteriaInput = z.infer<typeof FindEmailsByCriteriaInput
 const FindEmailsByCriteriaOutputSchema = z.object({
   emailAddresses: z
     .array(z.string())
-    .describe('The email addresses found. Each string should resemble an email format. Max 30 emails.'),
-  reasoning: z.string().optional().describe("Explanation of companies identified, emails suggested by AI, emails found via Apollo.io, and basic validation results. Includes if results were capped at 30 emails."),
+    .describe('The email addresses found after a basic format check. Each string should resemble an email format.'),
+  reasoning: z.string().optional().describe("Explanation of companies identified, emails suggested by AI, emails found via Apollo.io, and basic format check results."),
 });
 export type FindEmailsByCriteriaOutput = z.infer<typeof FindEmailsByCriteriaOutputSchema>;
 
@@ -66,8 +65,7 @@ If you achieve a target of over 1000 potential contacts, please indicate this in
 `,
 });
 
-const MAX_EMAILS_TO_RETURN = 30;
-const MAX_EMAILS_PER_DOMAIN_FROM_APOLLO = 5;
+const MAX_EMAILS_PER_DOMAIN_FROM_APOLLO = 5; // Still useful to limit Apollo per domain if it's too noisy
 
 const findEmailsByCriteriaFlow = ai.defineFlow(
   {
@@ -104,7 +102,7 @@ const findEmailsByCriteriaFlow = ai.defineFlow(
       const allPotentialEmailsFromAI: string[] = [];
       companiesFromLLM.forEach(company => {
         if (company.suggestedEmails && company.suggestedEmails.length > 0) {
-          allPotentialEmailsFromAI.push(...company.suggestedEmails);
+          allPotentialEmailsFromAI.push(...company.suggestedEmails.filter(e => typeof e === 'string'));
         }
       });
       totalAISuggestedEmails = allPotentialEmailsFromAI.length;
@@ -125,7 +123,7 @@ const findEmailsByCriteriaFlow = ai.defineFlow(
 
       apolloResults.forEach(result => {
         if (result.emails && result.emails.length > 0) {
-          allPotentialEmailsFromApollo.push(...result.emails);
+          allPotentialEmailsFromApollo.push(...result.emails.filter(e => typeof e === 'string'));
           totalApolloEmailsFound += result.emails.length;
         }
         if (result.error) {
@@ -194,28 +192,22 @@ const findEmailsByCriteriaFlow = ai.defineFlow(
       for (const result of validatedEmailResults) {
         if (result.status === 'valid' && result.email) {
           allFormatCheckedEmails.push(result.email);
-        } else if (result.status !== 'valid') { // e.g. 'invalid', 'error_tool_invocation_failed'
+        } else if (result.status !== 'valid') { 
           console.warn(`Basic email validation for ${result.email} resulted in status '${result.status}': ${result.sub_status}`);
           if(result.status === 'error_tool_invocation_failed') basicValidationToolError = true;
         }
       }
       
       reasoningSteps.push(`Basic format check confirmed ${allFormatCheckedEmails.length} email(s) as having a valid-looking format.`);
+      reasoningSteps.push(`Displaying all ${allFormatCheckedEmails.length} email(s) with a valid-looking format.`);
 
-      const emailsToReturn = allFormatCheckedEmails.slice(0, MAX_EMAILS_TO_RETURN);
-
-      if (allFormatCheckedEmails.length > MAX_EMAILS_TO_RETURN) {
-        reasoningSteps.push(`Displaying the first ${MAX_EMAILS_TO_RETURN} of these emails.`);
-      } else {
-        reasoningSteps.push(`Displaying all ${emailsToReturn.length} email(s) with a valid-looking format.`);
-      }
 
       if (basicValidationToolError) {
           reasoningSteps.push(`Some emails encountered errors during the basic format validation tool invocation. Please check server logs for details.`);
       }
 
       return {
-        emailAddresses: emailsToReturn,
+        emailAddresses: allFormatCheckedEmails, // Return all format-checked emails
         reasoning: reasoningSteps.join(' '),
       };
 
@@ -229,3 +221,4 @@ const findEmailsByCriteriaFlow = ai.defineFlow(
     }
   }
 );
+
