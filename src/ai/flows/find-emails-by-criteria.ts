@@ -43,7 +43,7 @@ const identifyCompaniesAndSuggestEmailsPrompt = ai.definePrompt({
     companies: z.array(z.object({
       name: z.string().describe("The name of the identified company."),
       domain: z.string().describe("The primary website domain of the company (e.g., example.com)."),
-      suggestedEmails: z.array(z.string().email()).describe("Email addresses directly suggested by the AI for this company based on public information or common patterns. These will be validated separately.").default([]),
+      suggestedEmails: z.array(z.string()).describe("Email addresses (or strings that look like emails) directly suggested by the AI for this company based on public information or common patterns. These will be validated separately by NeverBounce.").default([]),
     })).describe("A list of 5-10 diverse companies/organizations relevant to the search criteria. Prioritize companies for which email addresses are likely to be findable. For each, also suggest potential email addresses if possible."),
     initialReasoning: z.string().optional().describe("Brief reasoning for selecting these companies and suggesting initial emails based on the search criteria."),
   })},
@@ -56,12 +56,13 @@ Based on the search criteria, please:
 1.  Identify a list of 5 to 10 diverse companies or organizations that are highly relevant.
     Focus on companies where business contact information (emails) is likely to be publicly discoverable.
     For each company, provide its name and its primary website domain (e.g., 'Google', 'google.com').
-2.  For each identified company, if possible, directly suggest a few potential email addresses. These could be generic (e.g., contact@, info@) or based on common patterns if individual names are discoverable (e.g., firstname.lastname@domain.com). Only list emails that appear valid.
+2.  For each identified company, if possible, directly suggest a few potential email addresses (or strings that look like email addresses). These could be generic (e.g., contact@, info@) or based on common patterns if individual names are discoverable (e.g., firstname.lastname@domain.com).
 3.  Provide a brief 'initialReasoning' explaining why these companies were chosen and how you approached suggesting emails.
 
 List the companies in the 'companies' array, each with 'name', 'domain', and 'suggestedEmails'. If no emails can be suggested for a company, return an empty array for 'suggestedEmails'.
 Your goal is to provide a broad starting point for contact discovery. Aim for a substantial number of contacts overall when combined with other tools, potentially well over 1000 if the criteria are broad. Think expansively, consider related and adjacent industries to maximize results if the initial criteria is too narrow. Clearly state in your reasoning if and how you broadened the search.
-Include various types of publicly listed email addresses, such as generic company contacts, and emails of individuals associated with these companies if publicly available (e.g., on company websites, public professional directories, professional social media pages where emails are openly shared). Personal-style email addresses (e.g., from providers like Gmail, Outlook.com, Yahoo, etc.) should ONLY be included if they are publicly listed by individuals in direct relation to their professional activities, services, or public profile relevant to the search criteria.
+Include various types of publicly listed email addresses, such as generic company contacts, and emails of individuals associated with these companies if publicly available (e.g., on company websites, public professional directories, professional social media pages where emails are openly shared, relevant online forums, personal websites, or professional portfolios). Personal-style email addresses (e.g., from providers like Gmail, Outlook.com, Yahoo, etc.) should be included if they are publicly listed by individuals in direct relation to their professional activities, services, or public profile relevant to the search criteria.
+If you achieve a target of over 1000 potential contacts, please indicate this in your reasoning and describe the breadth of your search.
 `,
 });
 
@@ -123,7 +124,7 @@ const findEmailsByCriteriaFlow = ai.defineFlow(
       const apolloResults = await Promise.all(apolloPromises);
 
       apolloResults.forEach(result => {
-        if (result.emails.length > 0) {
+        if (result.emails && result.emails.length > 0) { // Added null check for result.emails
           allPotentialEmailsFromApollo.push(...result.emails);
           totalApolloEmailsFound += result.emails.length;
         }
@@ -149,7 +150,7 @@ const findEmailsByCriteriaFlow = ai.defineFlow(
       }
       
       // Remove duplicates before validation
-      const uniquePotentialEmails = Array.from(new Set(combinedPotentialEmails));
+      const uniquePotentialEmails = Array.from(new Set(combinedPotentialEmails.filter(email => typeof email === 'string' && email.trim() !== ''))); // Filter out non-strings or empty strings
       reasoningSteps.push(`Combined to ${uniquePotentialEmails.length} unique potential emails for validation.`);
 
       // Step 3: Validate all unique emails using NeverBounce (via validateEmailTool)
@@ -181,7 +182,7 @@ const findEmailsByCriteriaFlow = ai.defineFlow(
       }
       
       for (const result of validatedEmailResults) {
-        if (result.status === 'valid') {
+        if (result.status === 'valid' && result.email) { // ensure result.email is present
           allVerifiedEmails.push(result.email);
         } else if (
           result.status === 'error_api_key_missing' ||

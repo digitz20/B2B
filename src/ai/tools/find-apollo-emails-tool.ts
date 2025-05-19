@@ -14,7 +14,7 @@ export type FindApolloEmailsInput = z.infer<typeof FindApolloEmailsInputSchema>;
 
 export const FindApolloEmailsOutputSchema = z.object({
   domain: z.string(),
-  emails: z.array(z.string().email()).describe('A list of email addresses found for the domain.'),
+  emails: z.array(z.string()).describe('A list of email addresses (or strings that look like emails) found for the domain. These will be validated separately by NeverBounce.'),
   error: z.string().optional().describe('Any error message if the search failed.'),
 });
 export type FindApolloEmailsOutput = z.infer<typeof FindApolloEmailsOutputSchema>;
