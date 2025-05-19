@@ -2,7 +2,7 @@
 'use server';
 /**
  * @fileOverview Finds email addresses for companies and individuals related to a given search criteria (profession, industry, or work aspect),
- * and validates them using ZeroBounce. Returns a maximum of 30 validated emails.
+ * and validates them using NeverBounce. Returns a maximum of 30 validated emails.
  *
  * - findEmailsByCriteria - A function that handles the email finding and validation process.
  * - FindEmailsByCriteriaInput - The input type for the findEmailsByCriteria function.
@@ -24,7 +24,7 @@ const FindEmailsByCriteriaOutputSchema = z.object({
   emailAddresses: z
     .array(z.string())
     .describe('The VERIFIED email addresses. Each string should be a valid email format. Max 30 emails.'),
-  reasoning: z.string().optional().describe("Explanation of the companies, individuals, and email addresses found related to the search criteria. Includes how many initial emails were found, how many were verified by ZeroBounce, and if the target of 1000+ was met, explain limitations or how breadth was achieved if it wasn't. Mentions if results were capped at 30 validated emails."),
+  reasoning: z.string().optional().describe("Explanation of the companies, individuals, and email addresses found related to the search criteria. Includes how many initial emails were found, how many were verified by NeverBounce, and if the target of 1000+ was met, explain limitations or how breadth was achieved if it wasn't. Mentions if results were capped at 30 validated emails."),
 });
 export type FindEmailsByCriteriaOutput = z.infer<typeof FindEmailsByCriteriaOutputSchema>;
 
@@ -47,7 +47,7 @@ Your process should be:
 1.  **Think Expansively**: Identify a very large and diverse set of companies **and individual professionals** highly relevant to the 'searchCriteria'. Do not limit yourself to obvious matches. If the core criteria is narrow, explore broadly into related, adjacent, or supporting industries, roles, and professional communities (including online forums, professional social media profiles where emails are publicly listed such as LinkedIn, public directories, and personal portfolio websites) that would still be valuable to someone interested in the 'searchCriteria'. Consider less direct but still plausible connections if it helps to achieve the volume target. The goal is to maximize the number of potential contacts.
 2.  **Exhaustive Email Search**: For each identified company or individual professional, diligently search for multiple publicly available contact email addresses. This can include:
     *   Business email addresses (e.g., \`name@company.com\`, \`info@company.com\`, \`sales@department.com\`).
-    *   Personal-style email addresses (e.g., from providers like Gmail, Outlook.com, Yahoo, etc.) **only if they are publicly listed by individuals in direct relation to their professional activities, services, or public profile (like a personal website, portfolio, or professional social media page where the email is openly shared) relevant to the search criteria.** Do not invent or assume personal emails.
+    *   Personal-style email addresses (e.g., from providers like Gmail, Outlook.com, Yahoo, etc.) that individuals have **publicly listed** in contexts that could be relevant to the 'searchCriteria'. This could include their personal websites, professional portfolios, public directories, relevant online forums, or professional social media profiles where the email is openly shared for contact. Prioritize emails that appear to be used for professional communication, by individuals offering services/expertise, or by those active in communities related to the search criteria. Do not invent or assume personal emails.
 3.  **Compile Results**: Compile all found, publicly listed email addresses into a single, flat list in the 'emailAddresses' field.
 4.  **Initial Reasoning**: In the 'reasoning' field, provide:
     *   A summary of the types of companies, roles, and individuals targeted, and the types of sources considered (e.g., company websites, professional directories, public social media profiles where emails are openly shared).
@@ -133,7 +133,7 @@ const findEmailsByCriteriaFlow = ai.defineFlow(
       }
       
       let finalReasoning = `${initialReasoning} Found ${candidateEmails.length} potential email(s). `;
-      finalReasoning += `After ZeroBounce verification, ${allVerifiedEmails.length} email(s) were confirmed as valid. `;
+      finalReasoning += `After NeverBounce verification, ${allVerifiedEmails.length} email(s) were confirmed as valid. `;
 
       const emailsToReturn = allVerifiedEmails.slice(0, MAX_VALIDATED_EMAILS_TO_RETURN);
 
@@ -144,7 +144,7 @@ const findEmailsByCriteriaFlow = ai.defineFlow(
       }
 
       if (validationToolError) {
-          finalReasoning += `Some email validations may have been skipped or failed due to ZeroBounce API issues (e.g., misconfigured API key, service error, or tool invocation problem). Please check server logs for details. `;
+          finalReasoning += `Some email validations may have been skipped or failed due to NeverBounce API issues (e.g., misconfigured API key, service error, or tool invocation problem). Please check server logs for details. `;
       }
 
       return {
