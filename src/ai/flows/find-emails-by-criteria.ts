@@ -1,8 +1,11 @@
 
 'use server';
 /**
- * @fileOverview Finds email addresses for companies and individuals related to a given search criteria (profession, industry, or work aspect),
- * and validates them using NeverBounce. Returns a maximum of 30 validated emails.
+ * @fileOverview Finds email addresses related to a given search criteria.
+ * It first uses an LLM to identify relevant company domains.
+ * Then, it uses Apollo.io (via a tool) to find emails for those domains.
+ * Finally, it validates the found emails using NeverBounce (via a tool).
+ * Returns a maximum of 30 validated emails.
  *
  * - findEmailsByCriteria - A function that handles the email finding and validation process.
  * - FindEmailsByCriteriaInput - The input type for the findEmailsByCriteria function.
@@ -12,19 +15,20 @@
 import {ai} from '@/ai/genkit';
 import {z} from 'genkit';
 import { validateEmailTool, type ValidateEmailOutput } from '@/ai/tools/validate-email-tool';
+import { findApolloEmailsTool, type FindApolloEmailsOutput } from '@/ai/tools/find-apollo-emails-tool';
 
 const FindEmailsByCriteriaInputSchema = z.object({
   searchCriteria: z
     .string()
-    .describe('The profession, industry, or aspect of work to search for email addresses.'),
+    .describe('The profession, industry, or aspect of work to search for.'),
 });
 export type FindEmailsByCriteriaInput = z.infer<typeof FindEmailsByCriteriaInputSchema>;
 
 const FindEmailsByCriteriaOutputSchema = z.object({
   emailAddresses: z
-    .array(z.string())
+    .array(z.string().email())
     .describe('The VERIFIED email addresses. Each string should be a valid email format. Max 30 emails.'),
-  reasoning: z.string().optional().describe("Explanation of the companies, individuals, and email addresses found related to the search criteria. Includes how many initial emails were found, how many were verified by NeverBounce, and if the target of 1000+ was met, explain limitations or how breadth was achieved if it wasn't. Mentions if results were capped at 30 validated emails."),
+  reasoning: z.string().optional().describe("Explanation of the companies identified, emails found via Apollo.io, and validation results from NeverBounce. Includes if results were capped at 30 validated emails."),
 });
 export type FindEmailsByCriteriaOutput = z.infer<typeof FindEmailsByCriteriaOutputSchema>;
 
@@ -32,76 +36,118 @@ export async function findEmailsByCriteria(input: FindEmailsByCriteriaInput): Pr
   return findEmailsByCriteriaFlow(input);
 }
 
-const findEmailsByCriteriaPrompt = ai.definePrompt({
-  name: 'findEmailsByCriteriaPrompt',
+const identifyCompaniesPrompt = ai.definePrompt({
+  name: 'identifyCompaniesPrompt',
   input: {schema: FindEmailsByCriteriaInputSchema},
   output: {schema: z.object({
-    emailAddresses: z.array(z.string()).describe('A large list of potential email addresses found. These will be verified separately.'),
-    reasoning: z.string().optional().describe("Initial reasoning before verification."),
+    companies: z.array(z.object({
+      name: z.string().describe("The name of the identified company."),
+      domain: z.string().describe("The primary website domain of the company (e.g., example.com).")
+    })).describe("A list of 5-10 diverse companies/organizations relevant to the search criteria. Prioritize companies for which email addresses are likely to be findable via business databases."),
+    initialReasoning: z.string().optional().describe("Brief reasoning for selecting these companies based on the search criteria."),
   })},
-  prompt: `You are an expert research assistant. Your mission is to compile an exceptionally large and diverse list of publicly listed email addresses, targeting **well over 1000 contacts**, and as many as possible, relevant to the given search criteria.
+  prompt: `You are an expert research assistant. Your task is to identify a list of companies relevant to the given search criteria.
+These companies will then be used to search for email addresses using a tool like Apollo.io.
 
 Search Criteria: {{{searchCriteria}}}
 
-Your process should be:
-1.  **Think Expansively**: Identify a very large and diverse set of companies **and individual professionals** highly relevant to the 'searchCriteria'. Do not limit yourself to obvious matches. If the core criteria is narrow, explore broadly into related, adjacent, or supporting industries, roles, and professional communities (including online forums, professional social media profiles where emails are publicly listed such as LinkedIn, public directories, and personal portfolio websites) that would still be valuable to someone interested in the 'searchCriteria'. Consider less direct but still plausible connections if it helps to achieve the volume target. The goal is to maximize the number of potential contacts.
-2.  **Exhaustive Email Search**: For each identified company or individual professional, diligently search for multiple publicly available contact email addresses. This can include:
-    *   Business email addresses (e.g., \`name@company.com\`, \`info@company.com\`, \`sales@department.com\`).
-    *   Personal-style email addresses (e.g., from providers like Gmail, Outlook.com, Yahoo, etc.) that individuals have **publicly listed** in contexts that could be relevant to the 'searchCriteria'. This could include their personal websites, professional portfolios, public directories, relevant online forums, or professional social media profiles where the email is openly shared for contact. Prioritize emails that appear to be used for professional communication, by individuals offering services/expertise, or by those active in communities related to the search criteria. Do not invent or assume personal emails.
-3.  **Compile Results**: Compile all found, publicly listed email addresses into a single, flat list in the 'emailAddresses' field.
-4.  **Initial Reasoning**: In the 'reasoning' field, provide:
-    *   A summary of the types of companies, roles, and individuals targeted, and the types of sources considered (e.g., company websites, professional directories, public social media profiles where emails are openly shared).
-    *   If the 'searchCriteria' was narrow, explain how you broadened the search to related or adjacent fields/professions to achieve a high volume of contacts.
-    *   An acknowledgement of the number of email addresses found.
-    *   If the target of 1000+ emails was met, explain how such breadth was achieved.
-    *   If the target of 1000+ emails was not met, explain the primary limitations encountered (e.g., genuine scarcity of publicly available information for the specific criteria even after broadening, niche industry).
+Based on the search criteria, please:
+1.  Identify a list of 5 to 10 diverse companies or organizations that are highly relevant.
+    Focus on companies where business contact information (emails) is likely to be publicly discoverable or available in business databases.
+    For each company, provide its name and its primary website domain (e.g., 'Google', 'google.com').
+2.  Provide a brief 'initialReasoning' explaining why these companies were chosen in relation to the 'searchCriteria'.
 
-Strive to maximize the number of unique, valid, and **publicly listed** email addresses. The goal is **maximum quantity and breadth**, while maintaining a reasonable degree of relevance to the search criteria, including related fields. Ensure all email addresses are correctly formatted. Do NOT pre-filter or verify emails yourself at this stage; just find as many as possible. Verification will happen in a subsequent step.
-  `,
+List the companies in the 'companies' array, each with a 'name' and 'domain'.
+`,
 });
 
 const MAX_VALIDATED_EMAILS_TO_RETURN = 30;
+const MAX_EMAILS_PER_DOMAIN_FROM_APOLLO = 5; // How many emails to fetch per domain from Apollo
 
 const findEmailsByCriteriaFlow = ai.defineFlow(
   {
     name: 'findEmailsByCriteriaFlow',
     inputSchema: FindEmailsByCriteriaInputSchema,
     outputSchema: FindEmailsByCriteriaOutputSchema,
-    tools: [validateEmailTool],
+    tools: [findApolloEmailsTool, validateEmailTool], // Both tools are available
   },
   async (input: FindEmailsByCriteriaInput): Promise<FindEmailsByCriteriaOutput> => {
+    let llmReasoning = "Process started. ";
+    let apolloSummary = "";
+    let validationSummary = "";
+    let identifiedCompanyCount = 0;
+    let totalApolloEmailsFound = 0;
+
     try {
-      const llmResponse = await findEmailsByCriteriaPrompt(input);
+      // Step 1: Use LLM to identify relevant companies
+      const llmResponse = await identifyCompaniesPrompt(input);
       
-      if (!llmResponse.output) {
-        console.warn('AI model did not return an output for findEmailsByCriteriaPrompt.');
+      if (!llmResponse.output || !llmResponse.output.companies || llmResponse.output.companies.length === 0) {
+        llmReasoning += 'LLM could not identify relevant companies for the search criteria. ';
         return {
           emailAddresses: [],
-          reasoning: 'AI model failed to generate an initial list of emails. Please try a different search criteria or try again later.',
+          reasoning: llmReasoning + "No companies identified to search with Apollo.io.",
         };
       }
+      
+      const companiesToSearch = llmResponse.output.companies;
+      identifiedCompanyCount = companiesToSearch.length;
+      llmReasoning += llmResponse.output.initialReasoning || `LLM identified ${identifiedCompanyCount} companies. `;
 
-      const candidateEmails = llmResponse.output.emailAddresses || [];
-      const initialReasoning = llmResponse.output.reasoning || "No initial reasoning provided by AI.";
+      // Step 2: Use Apollo.io tool to find emails for these companies
+      const allPotentialEmails: string[] = [];
+      let apolloToolErrors = 0;
 
-      if (candidateEmails.length === 0) {
+      const apolloPromises = companiesToSearch.map(company => 
+        findApolloEmailsTool({ domain: company.domain, maxEmailsPerDomain: MAX_EMAILS_PER_DOMAIN_FROM_APOLLO })
+          .catch(e => {
+            console.error(`Error calling findApolloEmailsTool for ${company.domain}:`, e);
+            apolloToolErrors++;
+            return { domain: company.domain, emails: [], error: e instanceof Error ? e.message : "Unknown tool error" } as FindApolloEmailsOutput;
+          })
+      );
+      
+      const apolloResults = await Promise.all(apolloPromises);
+
+      apolloResults.forEach(result => {
+        if (result.emails.length > 0) {
+          allPotentialEmails.push(...result.emails);
+          totalApolloEmailsFound += result.emails.length;
+        }
+        if (result.error) {
+            console.warn(`Apollo.io tool error for domain ${result.domain}: ${result.error}`);
+            // Optionally add to reasoning: llmReasoning += `Apollo.io error for ${result.domain}. `;
+        }
+      });
+      
+      apolloSummary = `Attempted to find emails for ${identifiedCompanyCount} domains using Apollo.io. Found ${totalApolloEmailsFound} potential email(s). `;
+      if (apolloToolErrors > 0) {
+        apolloSummary += `${apolloToolErrors} domain(s) encountered errors during Apollo.io search. `;
+      }
+
+      if (allPotentialEmails.length === 0) {
         return {
           emailAddresses: [],
-          reasoning: `${initialReasoning} No candidate emails were found by the AI to verify.`,
+          reasoning: llmReasoning + apolloSummary + "No potential emails found via Apollo.io to validate.",
         };
       }
+      
+      // Remove duplicates before validation
+      const uniquePotentialEmails = Array.from(new Set(allPotentialEmails));
 
+      // Step 3: Validate emails using NeverBounce (via validateEmailTool)
       const allVerifiedEmails: string[] = [];
       let validationToolError = false;
       const validatedEmailResults: ValidateEmailOutput[] = [];
-      const CHUNK_SIZE = 10; // Process 10 emails concurrently
+      const CHUNK_SIZE = 10; // Process 10 email validations concurrently
 
-      for (let i = 0; i < candidateEmails.length; i += CHUNK_SIZE) {
-        const chunk = candidateEmails.slice(i, i + CHUNK_SIZE);
+      for (let i = 0; i < uniquePotentialEmails.length; i += CHUNK_SIZE) {
+        const chunk = uniquePotentialEmails.slice(i, i + CHUNK_SIZE);
         const validationPromises = chunk.map(email =>
           validateEmailTool({ email })
             .catch(e => {
               console.error(`Critical error during validateEmailTool call for ${email}:`, e);
+              validationToolError = true;
               return {
                 email: email,
                 status: 'error_tool_invocation_failed',
@@ -124,40 +170,39 @@ const findEmailsByCriteriaFlow = ai.defineFlow(
         } else if (
           result.status === 'error_api_key_missing' ||
           result.status === 'error_validation_failed' ||
-          result.status === 'error_tool_invocation_failed'
+          result.status === 'error_tool_invocation_failed' ||
+          result.status === 'error_rate_limited'
         ) {
           console.warn(`Email validation for ${result.email} resulted in status '${result.status}': ${result.sub_status}`);
           validationToolError = true;
         }
-        // Other statuses (invalid, catch-all, unknown, etc.) are silently ignored
       }
       
-      let finalReasoning = `${initialReasoning} Found ${candidateEmails.length} potential email(s). `;
-      finalReasoning += `After NeverBounce verification, ${allVerifiedEmails.length} email(s) were confirmed as valid. `;
+      validationSummary = `From ${uniquePotentialEmails.length} unique emails, ${allVerifiedEmails.length} email(s) were confirmed as valid by NeverBounce. `;
 
       const emailsToReturn = allVerifiedEmails.slice(0, MAX_VALIDATED_EMAILS_TO_RETURN);
 
       if (allVerifiedEmails.length > MAX_VALIDATED_EMAILS_TO_RETURN) {
-        finalReasoning += `Displaying the first ${MAX_VALIDATED_EMAILS_TO_RETURN} of these validated emails. `;
+        validationSummary += `Displaying the first ${MAX_VALIDATED_EMAILS_TO_RETURN} of these validated emails. `;
       } else {
-        finalReasoning += `Displaying all ${emailsToReturn.length} validated email(s). `;
+        validationSummary += `Displaying all ${emailsToReturn.length} validated email(s). `;
       }
 
       if (validationToolError) {
-          finalReasoning += `Some email validations may have been skipped or failed due to NeverBounce API issues (e.g., misconfigured API key, service error, or tool invocation problem). Please check server logs for details. `;
+          validationSummary += `Some email validations may have been skipped or failed due to NeverBounce API issues (e.g., misconfigured API key, service error, or tool invocation problem). Check server logs. `;
       }
 
       return {
         emailAddresses: emailsToReturn,
-        reasoning: finalReasoning,
+        reasoning: llmReasoning + apolloSummary + validationSummary,
       };
+
     } catch (error) {
       console.error('CRITICAL_ERROR in findEmailsByCriteriaFlow:', error instanceof Error ? error.stack : String(error));
       return {
         emailAddresses: [],
-        reasoning: 'A critical server error occurred. Please check server logs or try again later.',
+        reasoning: llmReasoning + apolloSummary + validationSummary + 'A critical server error occurred during the find contacts process. Please check server logs or try again later.',
       };
     }
   }
 );
-
