@@ -31,7 +31,6 @@ export async function extractEmailsFromText(input: ExtractEmailsFromTextInput): 
 const extractEmailsPrompt = ai.definePrompt({
   name: 'extractEmailsFromTextPrompt',
   input: {schema: ExtractEmailsFromTextInputSchema},
-  // AI model outputs candidate emails; verification happens in the flow
   output: {schema: z.object({
     extractedEmails: z.array(z.string()).describe('A list of email addresses found in the text. These will be verified separately.').default([]),
     originalTextCharacterCount: z.number().describe('The total number of characters in the original input text block.'),
@@ -57,9 +56,9 @@ const extractEmailsFromTextFlow = ai.defineFlow(
     name: 'extractEmailsFromTextFlow',
     inputSchema: ExtractEmailsFromTextInputSchema,
     outputSchema: ExtractEmailsFromTextOutputSchema,
-    tools: [validateEmailTool], // Make the tool available to this flow
+    tools: [validateEmailTool],
   },
-  async (input: ExtractEmailsFromTextInput) => {
+  async (input: ExtractEmailsFromTextInput): Promise<ExtractEmailsFromTextOutput> => {
     const llmResponse = await extractEmailsPrompt(input);
     const candidateEmails = llmResponse.output?.extractedEmails || [];
     const charCount = llmResponse.output?.originalTextCharacterCount || input.textBlock.length;
@@ -83,28 +82,50 @@ const extractEmailsFromTextFlow = ai.defineFlow(
 
     const verifiedEmails: string[] = [];
     let validationToolError = false;
+    const validatedEmailResults: ValidateEmailOutput[] = [];
+    const CHUNK_SIZE = 10; // Process 10 emails concurrently
 
-    for (const email of candidateEmails) {
+    for (let i = 0; i < candidateEmails.length; i += CHUNK_SIZE) {
+      const chunk = candidateEmails.slice(i, i + CHUNK_SIZE);
+      const validationPromises = chunk.map(email =>
+        validateEmailTool({ email })
+          .catch(e => {
+            console.error(`Critical error during validateEmailTool call for ${email}:`, e);
+            return {
+              email: email,
+              status: 'error_tool_invocation_failed',
+              sub_status: e instanceof Error ? e.message : 'unknown_tool_error',
+            } as ValidateEmailOutput;
+          })
+      );
       try {
-        const validationResult: ValidateEmailOutput = await validateEmailTool({ email });
-        if (validationResult.status === 'valid') {
-          verifiedEmails.push(email);
-        } else if (validationResult.status === 'error_api_key_missing' || validationResult.status === 'error_validation_failed') {
-          console.warn(`Email validation skipped for ${email} due to tool error: ${validationResult.status} - ${validationResult.sub_status}`);
-          validationToolError = true;
-        }
+        const chunkResults = await Promise.all(validationPromises);
+        validatedEmailResults.push(...chunkResults);
       } catch (e) {
-        console.error(`Error calling validateEmailTool for ${email}:`, e);
+        console.error('Error processing a chunk of email validations:', e);
         validationToolError = true;
       }
+    }
+
+    for (const result of validatedEmailResults) {
+      if (result.status === 'valid') {
+        verifiedEmails.push(result.email);
+      } else if (
+        result.status === 'error_api_key_missing' ||
+        result.status === 'error_validation_failed' ||
+        result.status === 'error_tool_invocation_failed'
+      ) {
+        console.warn(`Email validation for ${result.email} resulted in status '${result.status}': ${result.sub_status}`);
+        validationToolError = true;
+      }
+      // Other statuses (invalid, catch-all, unknown, etc.) are silently ignored
     }
 
     let finalSummary = `Initially extracted ${candidateEmails.length} email(s). After ZeroBounce verification, ${verifiedEmails.length} email(s) were confirmed as valid. `;
     finalSummary += `Original text character count: ${charCount}. `;
      if (validationToolError) {
-        finalSummary += `Some email validations may have been skipped due to ZeroBounce API issues (e.g., misconfigured API key or service error). Please check server logs. `;
+        finalSummary += `Some email validations may have been skipped or failed due to ZeroBounce API issues (e.g., misconfigured API key, service error, or tool invocation problem). Please check server logs. `;
     }
-
 
     return {
       extractedEmails: verifiedEmails,

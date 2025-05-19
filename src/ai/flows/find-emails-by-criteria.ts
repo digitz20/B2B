@@ -35,7 +35,6 @@ export async function findEmailsByCriteria(input: FindEmailsByCriteriaInput): Pr
 const findEmailsByCriteriaPrompt = ai.definePrompt({
   name: 'findEmailsByCriteriaPrompt',
   input: {schema: FindEmailsByCriteriaInputSchema},
-  // The AI model will still output a broader list, verification happens in the flow
   output: {schema: z.object({
     emailAddresses: z.array(z.string()).describe('A large list of potential email addresses found. These will be verified separately.'),
     reasoning: z.string().optional().describe("Initial reasoning before verification."),
@@ -45,7 +44,7 @@ const findEmailsByCriteriaPrompt = ai.definePrompt({
 Search Criteria: {{{searchCriteria}}}
 
 Your process should be:
-1.  **Think Expansively**: Identify a very large and diverse set of companies **and individual professionals** highly relevant to the 'searchCriteria'. Do not limit yourself to obvious matches. If the core criteria is narrow, explore broadly into related, adjacent, or supporting industries, roles, and professional communities (including online forums, professional social media profiles where emails are publicly listed, and public directories) that would still be valuable to someone interested in the 'searchCriteria'. Consider less direct but still plausible connections if it helps to achieve the volume target. The goal is to maximize the number of potential contacts.
+1.  **Think Expansively**: Identify a very large and diverse set of companies **and individual professionals** highly relevant to the 'searchCriteria'. Do not limit yourself to obvious matches. If the core criteria is narrow, explore broadly into related, adjacent, or supporting industries, roles, and professional communities (including online forums, professional social media profiles where emails are publicly listed such as LinkedIn, and public directories) that would still be valuable to someone interested in the 'searchCriteria'. Consider less direct but still plausible connections if it helps to achieve the volume target. The goal is to maximize the number of potential contacts.
 2.  **Exhaustive Email Search**: For each identified company or individual professional, diligently search for multiple publicly available contact email addresses. This can include:
     *   Business email addresses (e.g., \`name@company.com\`, \`info@company.com\`, \`sales@department.com\`).
     *   Personal-style email addresses (e.g., from providers like Gmail, Outlook.com, Yahoo, etc.) **only if they are publicly listed by individuals in direct relation to their professional activities, services, or public profile (like a personal website, portfolio, or professional social media page where the email is openly shared) relevant to the search criteria.** Do not invent or assume personal emails.
@@ -66,12 +65,12 @@ const findEmailsByCriteriaFlow = ai.defineFlow(
     name: 'findEmailsByCriteriaFlow',
     inputSchema: FindEmailsByCriteriaInputSchema,
     outputSchema: FindEmailsByCriteriaOutputSchema,
-    tools: [validateEmailTool], // Make the tool available to this flow
+    tools: [validateEmailTool],
   },
   async (input: FindEmailsByCriteriaInput) => {
     const llmResponse = await findEmailsByCriteriaPrompt(input);
     const candidateEmails = llmResponse.output?.emailAddresses || [];
-    const initialReasoning = llmResponse.output?.reasoning || "No initial reasoning provided.";
+    const initialReasoning = llmResponse.output?.reasoning || "No initial reasoning provided by AI.";
 
     if (candidateEmails.length === 0) {
       return {
@@ -82,31 +81,51 @@ const findEmailsByCriteriaFlow = ai.defineFlow(
 
     const verifiedEmails: string[] = [];
     let validationToolError = false;
+    const validatedEmailResults: ValidateEmailOutput[] = [];
+    const CHUNK_SIZE = 10; // Process 10 emails concurrently
 
-    // Sequentially validate to avoid hitting rate limits too quickly with Promise.all
-    // For a production app with many emails, consider batching and/or a queue.
-    for (const email of candidateEmails) {
+    for (let i = 0; i < candidateEmails.length; i += CHUNK_SIZE) {
+      const chunk = candidateEmails.slice(i, i + CHUNK_SIZE);
+      const validationPromises = chunk.map(email =>
+        validateEmailTool({ email })
+          .catch(e => {
+            console.error(`Critical error during validateEmailTool call for ${email}:`, e);
+            return {
+              email: email,
+              status: 'error_tool_invocation_failed',
+              sub_status: e instanceof Error ? e.message : 'unknown_tool_error',
+            } as ValidateEmailOutput;
+          })
+      );
       try {
-        const validationResult: ValidateEmailOutput = await validateEmailTool({ email });
-        if (validationResult.status === 'valid') {
-          verifiedEmails.push(email);
-        } else if (validationResult.status === 'error_api_key_missing' || validationResult.status === 'error_validation_failed') {
-          console.warn(`Email validation skipped for ${email} due to tool error: ${validationResult.status} - ${validationResult.sub_status}`);
-          // Potentially add unverified email if tool fails, or skip. For now, skip.
-          validationToolError = true; // Mark that an error occurred with the tool
-        }
+        const chunkResults = await Promise.all(validationPromises);
+        validatedEmailResults.push(...chunkResults);
       } catch (e) {
-        console.error(`Error calling validateEmailTool for ${email}:`, e);
+        // Should not happen if individual promises have catches, but as a safeguard
+        console.error('Error processing a chunk of email validations:', e);
+        validationToolError = true; 
+      }
+    }
+    
+    for (const result of validatedEmailResults) {
+      if (result.status === 'valid') {
+        verifiedEmails.push(result.email);
+      } else if (
+        result.status === 'error_api_key_missing' ||
+        result.status === 'error_validation_failed' ||
+        result.status === 'error_tool_invocation_failed'
+      ) {
+        console.warn(`Email validation for ${result.email} resulted in status '${result.status}': ${result.sub_status}`);
         validationToolError = true;
       }
+      // Other statuses (invalid, catch-all, unknown, etc.) are silently ignored
     }
     
     let finalReasoning = `${initialReasoning} Found ${candidateEmails.length} potential email(s). `;
     finalReasoning += `After ZeroBounce verification, ${verifiedEmails.length} email(s) were confirmed as valid. `;
     if (validationToolError) {
-        finalReasoning += `Some email validations may have been skipped due to ZeroBounce API issues (e.g., misconfigured API key or service error). Please check server logs. `;
+        finalReasoning += `Some email validations may have been skipped or failed due to ZeroBounce API issues (e.g., misconfigured API key, service error, or tool invocation problem). Please check server logs for details. `;
     }
-
 
     return {
       emailAddresses: verifiedEmails,
