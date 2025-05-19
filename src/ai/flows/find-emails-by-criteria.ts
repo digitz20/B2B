@@ -67,69 +67,85 @@ const findEmailsByCriteriaFlow = ai.defineFlow(
     outputSchema: FindEmailsByCriteriaOutputSchema,
     tools: [validateEmailTool],
   },
-  async (input: FindEmailsByCriteriaInput) => {
-    const llmResponse = await findEmailsByCriteriaPrompt(input);
-    const candidateEmails = llmResponse.output?.emailAddresses || [];
-    const initialReasoning = llmResponse.output?.reasoning || "No initial reasoning provided by AI.";
+  async (input: FindEmailsByCriteriaInput): Promise<FindEmailsByCriteriaOutput> => {
+    try {
+      const llmResponse = await findEmailsByCriteriaPrompt(input);
+      
+      if (!llmResponse.output) {
+        console.warn('AI model did not return an output for findEmailsByCriteriaPrompt.');
+        return {
+          emailAddresses: [],
+          reasoning: 'AI model failed to generate an initial list of emails. Please try a different search criteria or try again later.',
+        };
+      }
 
-    if (candidateEmails.length === 0) {
+      const candidateEmails = llmResponse.output.emailAddresses || [];
+      const initialReasoning = llmResponse.output.reasoning || "No initial reasoning provided by AI.";
+
+      if (candidateEmails.length === 0) {
+        return {
+          emailAddresses: [],
+          reasoning: `${initialReasoning} No candidate emails were found by the AI to verify.`,
+        };
+      }
+
+      const verifiedEmails: string[] = [];
+      let validationToolError = false;
+      const validatedEmailResults: ValidateEmailOutput[] = [];
+      const CHUNK_SIZE = 10; // Process 10 emails concurrently
+
+      for (let i = 0; i < candidateEmails.length; i += CHUNK_SIZE) {
+        const chunk = candidateEmails.slice(i, i + CHUNK_SIZE);
+        const validationPromises = chunk.map(email =>
+          validateEmailTool({ email })
+            .catch(e => {
+              console.error(`Critical error during validateEmailTool call for ${email}:`, e);
+              return {
+                email: email,
+                status: 'error_tool_invocation_failed',
+                sub_status: e instanceof Error ? e.message : 'unknown_tool_error',
+              } as ValidateEmailOutput;
+            })
+        );
+        try {
+          const chunkResults = await Promise.all(validationPromises);
+          validatedEmailResults.push(...chunkResults);
+        } catch (e) {
+          console.error('Error processing a chunk of email validations:', e);
+          validationToolError = true; 
+        }
+      }
+      
+      for (const result of validatedEmailResults) {
+        if (result.status === 'valid') {
+          verifiedEmails.push(result.email);
+        } else if (
+          result.status === 'error_api_key_missing' ||
+          result.status === 'error_validation_failed' ||
+          result.status === 'error_tool_invocation_failed'
+        ) {
+          console.warn(`Email validation for ${result.email} resulted in status '${result.status}': ${result.sub_status}`);
+          validationToolError = true;
+        }
+        // Other statuses (invalid, catch-all, unknown, etc.) are silently ignored
+      }
+      
+      let finalReasoning = `${initialReasoning} Found ${candidateEmails.length} potential email(s). `;
+      finalReasoning += `After ZeroBounce verification, ${verifiedEmails.length} email(s) were confirmed as valid. `;
+      if (validationToolError) {
+          finalReasoning += `Some email validations may have been skipped or failed due to ZeroBounce API issues (e.g., misconfigured API key, service error, or tool invocation problem). Please check server logs for details. `;
+      }
+
+      return {
+        emailAddresses: verifiedEmails,
+        reasoning: finalReasoning,
+      };
+    } catch (error) {
+      console.error('Unexpected error in findEmailsByCriteriaFlow:', error);
       return {
         emailAddresses: [],
-        reasoning: `${initialReasoning} No candidate emails were found by the AI to verify.`,
+        reasoning: `An unexpected error occurred while finding emails: ${error instanceof Error ? error.message : 'Unknown error'}. Please check server logs.`,
       };
     }
-
-    const verifiedEmails: string[] = [];
-    let validationToolError = false;
-    const validatedEmailResults: ValidateEmailOutput[] = [];
-    const CHUNK_SIZE = 10; // Process 10 emails concurrently
-
-    for (let i = 0; i < candidateEmails.length; i += CHUNK_SIZE) {
-      const chunk = candidateEmails.slice(i, i + CHUNK_SIZE);
-      const validationPromises = chunk.map(email =>
-        validateEmailTool({ email })
-          .catch(e => {
-            console.error(`Critical error during validateEmailTool call for ${email}:`, e);
-            return {
-              email: email,
-              status: 'error_tool_invocation_failed',
-              sub_status: e instanceof Error ? e.message : 'unknown_tool_error',
-            } as ValidateEmailOutput;
-          })
-      );
-      try {
-        const chunkResults = await Promise.all(validationPromises);
-        validatedEmailResults.push(...chunkResults);
-      } catch (e) {
-        // Should not happen if individual promises have catches, but as a safeguard
-        console.error('Error processing a chunk of email validations:', e);
-        validationToolError = true; 
-      }
-    }
-    
-    for (const result of validatedEmailResults) {
-      if (result.status === 'valid') {
-        verifiedEmails.push(result.email);
-      } else if (
-        result.status === 'error_api_key_missing' ||
-        result.status === 'error_validation_failed' ||
-        result.status === 'error_tool_invocation_failed'
-      ) {
-        console.warn(`Email validation for ${result.email} resulted in status '${result.status}': ${result.sub_status}`);
-        validationToolError = true;
-      }
-      // Other statuses (invalid, catch-all, unknown, etc.) are silently ignored
-    }
-    
-    let finalReasoning = `${initialReasoning} Found ${candidateEmails.length} potential email(s). `;
-    finalReasoning += `After ZeroBounce verification, ${verifiedEmails.length} email(s) were confirmed as valid. `;
-    if (validationToolError) {
-        finalReasoning += `Some email validations may have been skipped or failed due to ZeroBounce API issues (e.g., misconfigured API key, service error, or tool invocation problem). Please check server logs for details. `;
-    }
-
-    return {
-      emailAddresses: verifiedEmails,
-      reasoning: finalReasoning,
-    };
   }
 );
