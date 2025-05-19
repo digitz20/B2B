@@ -2,7 +2,7 @@
 'use server';
 /**
  * @fileOverview Finds email addresses for companies and individuals related to a given search criteria (profession, industry, or work aspect),
- * and validates them using ZeroBounce.
+ * and validates them using ZeroBounce. Returns a maximum of 30 validated emails.
  *
  * - findEmailsByCriteria - A function that handles the email finding and validation process.
  * - FindEmailsByCriteriaInput - The input type for the findEmailsByCriteria function.
@@ -23,8 +23,8 @@ export type FindEmailsByCriteriaInput = z.infer<typeof FindEmailsByCriteriaInput
 const FindEmailsByCriteriaOutputSchema = z.object({
   emailAddresses: z
     .array(z.string())
-    .describe('The VERIFIED email addresses. Each string should be a valid email format.'),
-  reasoning: z.string().optional().describe("Explanation of the companies, individuals, and email addresses found related to the search criteria. Includes how many initial emails were found, how many were verified by ZeroBounce, and if the target of 1000+ was met, explain limitations or how breadth was achieved if it wasn't."),
+    .describe('The VERIFIED email addresses. Each string should be a valid email format. Max 30 emails.'),
+  reasoning: z.string().optional().describe("Explanation of the companies, individuals, and email addresses found related to the search criteria. Includes how many initial emails were found, how many were verified by ZeroBounce, and if the target of 1000+ was met, explain limitations or how breadth was achieved if it wasn't. Mentions if results were capped at 30 validated emails."),
 });
 export type FindEmailsByCriteriaOutput = z.infer<typeof FindEmailsByCriteriaOutputSchema>;
 
@@ -60,6 +60,8 @@ Strive to maximize the number of unique, valid, and **publicly listed** email ad
   `,
 });
 
+const MAX_VALIDATED_EMAILS_TO_RETURN = 30;
+
 const findEmailsByCriteriaFlow = ai.defineFlow(
   {
     name: 'findEmailsByCriteriaFlow',
@@ -89,7 +91,7 @@ const findEmailsByCriteriaFlow = ai.defineFlow(
         };
       }
 
-      const verifiedEmails: string[] = [];
+      const allVerifiedEmails: string[] = [];
       let validationToolError = false;
       const validatedEmailResults: ValidateEmailOutput[] = [];
       const CHUNK_SIZE = 10; // Process 10 emails concurrently
@@ -118,7 +120,7 @@ const findEmailsByCriteriaFlow = ai.defineFlow(
       
       for (const result of validatedEmailResults) {
         if (result.status === 'valid') {
-          verifiedEmails.push(result.email);
+          allVerifiedEmails.push(result.email);
         } else if (
           result.status === 'error_api_key_missing' ||
           result.status === 'error_validation_failed' ||
@@ -131,13 +133,22 @@ const findEmailsByCriteriaFlow = ai.defineFlow(
       }
       
       let finalReasoning = `${initialReasoning} Found ${candidateEmails.length} potential email(s). `;
-      finalReasoning += `After ZeroBounce verification, ${verifiedEmails.length} email(s) were confirmed as valid. `;
+      finalReasoning += `After ZeroBounce verification, ${allVerifiedEmails.length} email(s) were confirmed as valid. `;
+
+      const emailsToReturn = allVerifiedEmails.slice(0, MAX_VALIDATED_EMAILS_TO_RETURN);
+
+      if (allVerifiedEmails.length > MAX_VALIDATED_EMAILS_TO_RETURN) {
+        finalReasoning += `Displaying the first ${MAX_VALIDATED_EMAILS_TO_RETURN} of these validated emails. `;
+      } else {
+        finalReasoning += `Displaying all ${emailsToReturn.length} validated email(s). `;
+      }
+
       if (validationToolError) {
           finalReasoning += `Some email validations may have been skipped or failed due to ZeroBounce API issues (e.g., misconfigured API key, service error, or tool invocation problem). Please check server logs for details. `;
       }
 
       return {
-        emailAddresses: verifiedEmails,
+        emailAddresses: emailsToReturn,
         reasoning: finalReasoning,
       };
     } catch (error) {
@@ -149,3 +160,4 @@ const findEmailsByCriteriaFlow = ai.defineFlow(
     }
   }
 );
+
