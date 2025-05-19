@@ -1,9 +1,9 @@
 
 'use server';
 /**
- * @fileOverview Extracts email addresses from a given block of text and validates them using ZeroBounce.
+ * @fileOverview Extracts email addresses from a given block of text and performs basic format validation.
  *
- * - extractEmailsFromText - A function that handles the email extraction and validation process.
+ * - extractEmailsFromText - A function that handles the email extraction and basic validation process.
  * - ExtractEmailsFromTextInput - The input type for the extractEmailsFromText function.
  * - ExtractEmailsFromTextOutput - The return type for the extractEmailsFromText function.
  */
@@ -18,9 +18,9 @@ const ExtractEmailsFromTextInputSchema = z.object({
 export type ExtractEmailsFromTextInput = z.infer<typeof ExtractEmailsFromTextInputSchema>;
 
 const ExtractEmailsFromTextOutputSchema = z.object({
-  extractedEmails: z.array(z.string().describe("A valid, VERIFIED email address extracted from the text.")).describe('A list of VERIFIED email addresses extracted from the input text.').default([]),
+  extractedEmails: z.array(z.string().describe("An email address extracted from the text that passed basic format validation.")).describe('A list of email addresses extracted from the input text that passed basic format validation.').default([]),
   originalTextCharacterCount: z.number().describe('The total number of characters in the original input text block.'),
-  extractionSummary: z.string().describe('A brief summary of the extraction and verification process, e.g., "Extracted X email(s), Y verified, from a text of Z characters."'),
+  extractionSummary: z.string().describe('A brief summary of the extraction and basic validation process, e.g., "Extracted X email(s), Y passed basic format check, from a text of Z characters."'),
 });
 export type ExtractEmailsFromTextOutput = z.infer<typeof ExtractEmailsFromTextOutputSchema>;
 
@@ -32,13 +32,13 @@ const extractEmailsPrompt = ai.definePrompt({
   name: 'extractEmailsFromTextPrompt',
   input: {schema: ExtractEmailsFromTextInputSchema},
   output: {schema: z.object({
-    extractedEmails: z.array(z.string()).describe('A list of email addresses found in the text. These will be verified separately.').default([]),
+    extractedEmails: z.array(z.string()).describe('A list of email addresses found in the text. These will undergo a basic format check.').default([]),
     originalTextCharacterCount: z.number().optional().describe('The total number of characters in the original input text block.'),
-    extractionSummary: z.string().optional().describe('A brief summary of the initial extraction process before verification.'),
+    extractionSummary: z.string().optional().describe('A brief summary of the initial extraction process before basic format check.'),
   })},
   prompt: `You are an email extraction specialist.
 Your task is to meticulously parse the provided text block and identify all strings that appear to be email addresses.
-Return only strings that look like properly formatted email addresses. Do NOT pre-filter or verify emails yourself at this stage; just find as many as possible. Verification will happen in a subsequent step.
+Return only strings that look like properly formatted email addresses. Do NOT pre-filter emails yourself at this stage; just find as many as possible. A basic format check will happen in a subsequent step.
 
 Input Text:
 {{{textBlock}}}
@@ -56,7 +56,7 @@ const extractEmailsFromTextFlow = ai.defineFlow(
     name: 'extractEmailsFromTextFlow',
     inputSchema: ExtractEmailsFromTextInputSchema,
     outputSchema: ExtractEmailsFromTextOutputSchema,
-    tools: [validateEmailTool],
+    tools: [validateEmailTool], // validateEmailTool is now a basic checker
   },
   async (input: ExtractEmailsFromTextInput): Promise<ExtractEmailsFromTextOutput> => {
     try {
@@ -84,21 +84,21 @@ const extractEmailsFromTextFlow = ai.defineFlow(
         return {
           extractedEmails: [],
           originalTextCharacterCount: charCount,
-          extractionSummary: `No potential emails found to verify. ${initialSummary}`,
+          extractionSummary: `No potential emails found to validate. ${initialSummary}`,
         };
       }
 
-      const verifiedEmails: string[] = [];
-      let validationToolError = false;
+      const formatCheckedEmails: string[] = [];
+      let basicValidationToolError = false;
       const validatedEmailResults: ValidateEmailOutput[] = [];
-      const CHUNK_SIZE = 10; // Process 10 emails concurrently
+      const CHUNK_SIZE = 10; 
 
       for (let i = 0; i < candidateEmails.length; i += CHUNK_SIZE) {
         const chunk = candidateEmails.slice(i, i + CHUNK_SIZE);
         const validationPromises = chunk.map(email =>
           validateEmailTool({ email })
             .catch(e => {
-              console.error(`Critical error during validateEmailTool call for ${email}:`, e);
+              console.error(`Critical error during basic validateEmailTool call for ${email}:`, e);
               return {
                 email: email,
                 status: 'error_tool_invocation_failed',
@@ -111,32 +111,27 @@ const extractEmailsFromTextFlow = ai.defineFlow(
           validatedEmailResults.push(...chunkResults);
         } catch (e) {
           console.error('Error processing a chunk of email validations:', e);
-          validationToolError = true;
+          basicValidationToolError = true;
         }
       }
 
       for (const result of validatedEmailResults) {
-        if (result.status === 'valid') {
-          verifiedEmails.push(result.email);
-        } else if (
-          result.status === 'error_api_key_missing' ||
-          result.status === 'error_validation_failed' ||
-          result.status === 'error_tool_invocation_failed'
-        ) {
+        if (result.status === 'valid' && result.email) {
+          formatCheckedEmails.push(result.email);
+        } else if (result.status === 'error_tool_invocation_failed') {
           console.warn(`Email validation for ${result.email} resulted in status '${result.status}': ${result.sub_status}`);
-          validationToolError = true;
+          basicValidationToolError = true;
         }
-        // Other statuses (invalid, catch-all, unknown, etc.) are silently ignored
       }
 
-      let finalSummary = `Initially extracted ${candidateEmails.length} email(s). After ZeroBounce verification, ${verifiedEmails.length} email(s) were confirmed as valid. `;
+      let finalSummary = `Initially extracted ${candidateEmails.length} email(s). After basic format check, ${formatCheckedEmails.length} email(s) were confirmed as having a valid-looking format. `;
       finalSummary += `Original text character count: ${charCount}. `;
-      if (validationToolError) {
-          finalSummary += `Some email validations may have been skipped or failed due to ZeroBounce API issues (e.g., misconfigured API key, service error, or tool invocation problem). Please check server logs. `;
+      if (basicValidationToolError) {
+          finalSummary += `Some emails may have encountered errors during the basic format validation tool invocation. Please check server logs. `;
       }
 
       return {
-        extractedEmails: verifiedEmails,
+        extractedEmails: formatCheckedEmails,
         originalTextCharacterCount: charCount,
         extractionSummary: finalSummary,
       };
@@ -150,4 +145,3 @@ const extractEmailsFromTextFlow = ai.defineFlow(
     }
   }
 );
-
