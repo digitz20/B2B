@@ -5,7 +5,7 @@ import * as React from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import * as z from "zod";
-import { Briefcase, Search, Loader2, AlertCircle, Mail, ClipboardCopy, Copy, XCircle, FileText } from "lucide-react";
+import { Briefcase, Search, Loader2, AlertCircle, Mail, ClipboardCopy, Copy, XCircle, FileText, Wand2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -24,7 +24,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 
 import { findEmailsByCriteria, type FindEmailsByCriteriaOutput } from "@/ai/flows/find-emails-by-criteria";
-import { extractEmailsFromText, type ExtractEmailsFromTextOutput, type ExtractEmailsFromTextInput } from "@/ai/flows/extract-emails-from-text";
+import { extractEmailsFromText, type ExtractEmailsFromTextOutput } from "@/ai/flows/extract-emails-from-text";
+import { generateEmailsFromNamesInText, type GenerateEmailsFromNamesInTextOutput } from "@/ai/flows/generate-emails-from-names-in-text";
 
 const findContactsFormSchema = z.object({
   searchCriteria: z.string().min(3, {
@@ -34,19 +35,29 @@ const findContactsFormSchema = z.object({
 type FindContactsFormValues = z.infer<typeof findContactsFormSchema>;
 
 const extractEmailsFormSchema = z.object({
-  textBlock: z.string().min(1, {
+  textBlockExtract: z.string().min(1, { // Renamed to avoid conflict
     message: "Please enter some text to extract emails from.",
   }),
 });
 type ExtractEmailsFormValues = z.infer<typeof extractEmailsFormSchema>;
 
+const generateEmailsFormSchema = z.object({
+  textBlockGenerate: z.string().min(10, { // Renamed to avoid conflict
+    message: "Please enter text with names (at least 10 characters).",
+  }),
+});
+type GenerateEmailsFormValues = z.infer<typeof generateEmailsFormSchema>;
+
+type ActiveTab = "find" | "extract" | "generate";
+
 export default function ContactFinderAIPage() {
-  const [activeTab, setActiveTab] = React.useState<"find" | "extract">("find");
+  const [activeTab, setActiveTab] = React.useState<ActiveTab>("find");
   const [isLoading, setIsLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   
   const [findContactsResult, setFindContactsResult] = React.useState<FindEmailsByCriteriaOutput | null>(null);
   const [extractionResult, setExtractionResult] = React.useState<ExtractEmailsFromTextOutput | null>(null);
+  const [generationResult, setGenerationResult] = React.useState<GenerateEmailsFromNamesInTextOutput | null>(null);
   
   const { toast } = useToast();
 
@@ -60,12 +71,20 @@ export default function ContactFinderAIPage() {
   const extractEmailsForm = useForm<ExtractEmailsFormValues>({
     resolver: zodResolver(extractEmailsFormSchema),
     defaultValues: {
-      textBlock: "",
+      textBlockExtract: "",
+    },
+  });
+
+  const generateEmailsForm = useForm<GenerateEmailsFormValues>({
+    resolver: zodResolver(generateEmailsFormSchema),
+    defaultValues: {
+      textBlockGenerate: "",
     },
   });
 
   const searchCriteriaValue = findContactsForm.watch("searchCriteria");
-  const textBlockValue = extractEmailsForm.watch("textBlock");
+  const textBlockExtractValue = extractEmailsForm.watch("textBlockExtract");
+  const textBlockGenerateValue = generateEmailsForm.watch("textBlockGenerate");
 
   async function onSubmitFindContacts(values: FindContactsFormValues) {
     setIsLoading(true);
@@ -78,12 +97,12 @@ export default function ContactFinderAIPage() {
       if (result.emailAddresses.length === 0) {
         toast({
           title: "No Contacts Found",
-          description: "We couldn't find any email addresses for the provided criteria.",
+          description: result.reasoning || "We couldn't find any email addresses for the provided criteria.",
         });
       } else {
         toast({
           title: "Contacts Found!",
-          description: `Found ${result.emailAddresses.length} email address(es).`,
+          description: `Found ${result.emailAddresses.length} email address(es). ${result.reasoning || ''}`,
         });
       }
     } catch (err) {
@@ -92,8 +111,8 @@ export default function ContactFinderAIPage() {
       setError(errorMessage);
       toast({
         variant: "destructive",
-        title: "Error",
-        description: `Failed to find contacts: ${errorMessage}`,
+        title: "Error Finding Contacts",
+        description: errorMessage,
       });
     } finally {
       setIsLoading(false);
@@ -106,7 +125,7 @@ export default function ContactFinderAIPage() {
     setExtractionResult(null);
 
     try {
-      const result = await extractEmailsFromText({ textBlock: values.textBlock });
+      const result = await extractEmailsFromText({ textBlock: values.textBlockExtract });
       setExtractionResult(result);
       if (result.extractedEmails.length === 0) {
         toast({
@@ -125,13 +144,46 @@ export default function ContactFinderAIPage() {
       setError(errorMessage);
       toast({
         variant: "destructive",
-        title: "Error",
-        description: `Failed to extract emails: ${errorMessage}`,
+        title: "Error Extracting Emails",
+        description: errorMessage,
       });
     } finally {
       setIsLoading(false);
     }
   }
+
+  async function onSubmitGenerateEmails(values: GenerateEmailsFormValues) {
+    setIsLoading(true);
+    setError(null);
+    setGenerationResult(null);
+    try {
+      const result = await generateEmailsFromNamesInText({ textBlock: values.textBlockGenerate });
+      setGenerationResult(result);
+      if (result.guessedEmails.length === 0) {
+        toast({
+          title: "No Emails Generated",
+          description: result.generationSummary || "Could not generate email guesses from the provided text.",
+        });
+      } else {
+        toast({
+          title: "Emails Guessed!",
+          description: result.generationSummary || `Successfully generated ${result.guessedEmails.length} email address(es).`,
+        });
+      }
+    } catch (err) {
+      console.error("Error generating emails:", err);
+      const errorMessage = err instanceof Error ? err.message : "An unexpected error occurred.";
+      setError(errorMessage);
+      toast({
+        variant: "destructive",
+        title: "Error Generating Emails",
+        description: errorMessage,
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
 
   const handleCopyEmail = (email: string) => {
     navigator.clipboard.writeText(email)
@@ -176,45 +228,40 @@ export default function ContactFinderAIPage() {
     findContactsForm.reset({ searchCriteria: "" });
     setFindContactsResult(null);
     setError(null);
-    toast({
-      title: "Cleared",
-      description: "Search input and results for 'Find Contacts' have been cleared.",
-    });
   };
 
   const handleClearExtractEmails = () => {
-    extractEmailsForm.reset({ textBlock: "" });
+    extractEmailsForm.reset({ textBlockExtract: "" });
     setExtractionResult(null);
     setError(null);
-    toast({
-      title: "Cleared",
-      description: "Text input and results for 'Extract Emails' have been cleared.",
-    });
+  };
+
+  const handleClearGenerateEmails = () => {
+    generateEmailsForm.reset({ textBlockGenerate: "" });
+    setGenerationResult(null);
+    setError(null);
   };
 
   const handleClearFindResultsOnly = () => {
     setFindContactsResult(null);
     setError(null);
-    toast({
-      title: "Results Cleared",
-      description: "Search results for 'Find Contacts' have been cleared.",
-    });
   };
 
   const handleClearExtractionResultsOnly = () => {
     setExtractionResult(null);
     setError(null);
-    toast({
-      title: "Results Cleared",
-      description: "Extraction results for 'Extract Emails' have been cleared.",
-    });
   };
   
-  const renderEmailList = (emails: string[]) => {
+  const handleClearGenerationResultsOnly = () => {
+    setGenerationResult(null);
+    setError(null);
+  };
+  
+  const renderEmailList = (emails: string[], listType: "found" | "extracted" | "generated") => {
     return (
       <ul className="space-y-3">
         {emails.map((email, index) => (
-          <li key={index} className="flex items-center justify-between p-3 bg-secondary/50 rounded-md">
+          <li key={`${listType}-${index}`} className="flex items-center justify-between p-3 bg-secondary/50 rounded-md">
             <div className="flex items-center">
               <Mail className="h-5 w-5 mr-3 text-primary" />
               <span className="text-base text-foreground break-all">{email}</span>
@@ -243,17 +290,20 @@ export default function ContactFinderAIPage() {
           <h1 className="text-4xl font-bold tracking-tight text-primary">ContactFinder AI</h1>
         </div>
         <p className="text-lg text-muted-foreground">
-          Find B2B contacts by criteria or extract emails from text using AI.
+          AI-powered tools to find B2B contacts, extract emails, or generate guesses from text.
         </p>
       </header>
 
-      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as "find" | "extract")} className="w-full max-w-2xl">
-        <TabsList className="grid w-full grid-cols-2 mb-6">
+      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as ActiveTab)} className="w-full max-w-2xl">
+        <TabsList className="grid w-full grid-cols-3 mb-6">
           <TabsTrigger value="find">
             <Search className="mr-2 h-5 w-5" /> Find Contacts
           </TabsTrigger>
           <TabsTrigger value="extract">
             <FileText className="mr-2 h-5 w-5" /> Extract Emails
+          </TabsTrigger>
+          <TabsTrigger value="generate">
+            <Wand2 className="mr-2 h-5 w-5" /> Generate Guesses
           </TabsTrigger>
         </TabsList>
 
@@ -303,7 +353,7 @@ export default function ContactFinderAIPage() {
                   />
                   <div className="flex flex-col sm:flex-row gap-3">
                     <Button type="submit" className="w-full text-base py-3" disabled={isLoading}>
-                      {isLoading ? (
+                      {isLoading && activeTab === "find" ? (
                         <Loader2 className="mr-2 h-5 w-5 animate-spin" />
                       ) : (
                         <Search className="mr-2 h-5 w-5" />
@@ -316,10 +366,10 @@ export default function ContactFinderAIPage() {
                         variant="outline" 
                         className="w-full sm:w-auto text-base py-3" 
                         onClick={handleClearFindContacts}
-                        disabled={isLoading}
+                        disabled={isLoading && activeTab === "find"}
                       >
                         <XCircle className="mr-2 h-5 w-5" />
-                        Clear
+                        Clear All
                       </Button>
                     )}
                   </div>
@@ -342,13 +392,13 @@ export default function ContactFinderAIPage() {
                 <form onSubmit={extractEmailsForm.handleSubmit(onSubmitExtractEmails)} className="space-y-6">
                   <FormField
                     control={extractEmailsForm.control}
-                    name="textBlock"
+                    name="textBlockExtract"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel htmlFor="textBlockInput" className="text-base">Text to Extract Emails From</FormLabel>
+                        <FormLabel htmlFor="textBlockExtractInput" className="text-base">Text to Extract Emails From</FormLabel>
                         <FormControl>
                            <Textarea
-                            id="textBlockInput"
+                            id="textBlockExtractInput"
                             placeholder="Paste text containing email addresses here..."
                             {...field}
                             className="text-base min-h-[150px] p-3"
@@ -361,23 +411,81 @@ export default function ContactFinderAIPage() {
                   />
                   <div className="flex flex-col sm:flex-row gap-3">
                     <Button type="submit" className="w-full text-base py-3" disabled={isLoading}>
-                      {isLoading ? (
+                      {isLoading && activeTab === "extract" ? (
                         <Loader2 className="mr-2 h-5 w-5 animate-spin" />
                       ) : (
                         <FileText className="mr-2 h-5 w-5" />
                       )}
                       Extract Emails
                     </Button>
-                     {(textBlockValue || extractionResult || (error && activeTab === "extract")) && (
+                     {(textBlockExtractValue || extractionResult || (error && activeTab === "extract")) && (
                        <Button 
                         type="button" 
                         variant="outline" 
                         className="w-full sm:w-auto text-base py-3" 
                         onClick={handleClearExtractEmails}
-                        disabled={isLoading}
+                        disabled={isLoading && activeTab === "extract"}
                       >
                         <XCircle className="mr-2 h-5 w-5" />
-                        Clear
+                        Clear All
+                      </Button>
+                    )}
+                  </div>
+                </form>
+              </Form>
+            </CardContent>
+          </Card>
+        </TabsContent>
+        
+        <TabsContent value="generate">
+          <Card className="w-full shadow-xl">
+            <CardHeader>
+              <CardTitle className="text-2xl">Generate Guessed Emails</CardTitle>
+              <CardDescription>
+                Paste text with names to generate potential email address guesses.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Form {...generateEmailsForm}>
+                <form onSubmit={generateEmailsForm.handleSubmit(onSubmitGenerateEmails)} className="space-y-6">
+                  <FormField
+                    control={generateEmailsForm.control}
+                    name="textBlockGenerate"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel htmlFor="textBlockGenerateInput" className="text-base">Text with Names</FormLabel>
+                        <FormControl>
+                           <Textarea
+                            id="textBlockGenerateInput"
+                            placeholder="Paste text containing names of people..."
+                            {...field}
+                            className="text-base min-h-[150px] p-3"
+                            aria-label="Text with names to generate email guesses from"
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <div className="flex flex-col sm:flex-row gap-3">
+                    <Button type="submit" className="w-full text-base py-3" disabled={isLoading}>
+                      {isLoading && activeTab === "generate" ? (
+                        <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                      ) : (
+                        <Wand2 className="mr-2 h-5 w-5" />
+                      )}
+                      Generate Guesses
+                    </Button>
+                     {(textBlockGenerateValue || generationResult || (error && activeTab === "generate")) && (
+                       <Button 
+                        type="button" 
+                        variant="outline" 
+                        className="w-full sm:w-auto text-base py-3" 
+                        onClick={handleClearGenerateEmails}
+                        disabled={isLoading && activeTab === "generate"}
+                      >
+                        <XCircle className="mr-2 h-5 w-5" />
+                        Clear All
                       </Button>
                     )}
                   </div>
@@ -391,7 +499,7 @@ export default function ContactFinderAIPage() {
       {isLoading && (
         <div className="mt-8 flex flex-col items-center text-muted-foreground">
           <Loader2 className="h-12 w-12 animate-spin text-primary mb-3" />
-          <p className="text-lg">Processing...</p>
+          <p className="text-lg">AI is thinking...</p>
         </div>
       )}
 
@@ -440,7 +548,7 @@ export default function ContactFinderAIPage() {
           </CardHeader>
           <CardContent>
             {findContactsResult.emailAddresses.length > 0 ? (
-              renderEmailList(findContactsResult.emailAddresses)
+              renderEmailList(findContactsResult.emailAddresses, "found")
             ) : (
               <p className="text-base text-center text-muted-foreground py-4">
                 No email addresses found for the provided criteria.
@@ -487,7 +595,7 @@ export default function ContactFinderAIPage() {
           </CardHeader>
           <CardContent>
             {extractionResult.extractedEmails.length > 0 ? (
-              renderEmailList(extractionResult.extractedEmails)
+              renderEmailList(extractionResult.extractedEmails, "extracted")
             ) : (
               <p className="text-base text-center text-muted-foreground py-4">
                 No email addresses were found in the provided text.
@@ -497,6 +605,53 @@ export default function ContactFinderAIPage() {
                 <p className="text-xs text-muted-foreground text-center pt-4">
                     Original text character count: {extractionResult.originalTextCharacterCount}
                 </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Results for Generate Guessed Emails */}
+      {activeTab === "generate" && generationResult && !isLoading && !error && (
+        <Card className="mt-8 w-full max-w-2xl shadow-xl">
+          <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+            <div className="flex-grow">
+              <CardTitle className="text-2xl">Guessed Emails</CardTitle>
+              {generationResult.generationSummary && (
+                <CardDescription className="italic text-sm pt-1">
+                  {generationResult.generationSummary}
+                </CardDescription>
+              )}
+            </div>
+            <div className="flex gap-2 mt-2 sm:mt-0 self-start sm:self-center">
+              {generationResult.guessedEmails.length > 0 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleCopyAllEmails(generationResult.guessedEmails)}
+                  aria-label="Copy all guessed email addresses"
+                >
+                  <Copy className="mr-2 h-4 w-4" />
+                  Copy All
+                </Button>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleClearGenerationResultsOnly}
+                aria-label="Clear guessed email results"
+              >
+                <XCircle className="mr-2 h-4 w-4" />
+                Clear Results
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {generationResult.guessedEmails.length > 0 ? (
+              renderEmailList(generationResult.guessedEmails, "generated")
+            ) : (
+              <p className="text-base text-center text-muted-foreground py-4">
+                No email addresses could be guessed from the provided text.
+              </p>
             )}
           </CardContent>
         </Card>
