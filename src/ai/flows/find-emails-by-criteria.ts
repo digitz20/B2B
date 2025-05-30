@@ -35,6 +35,8 @@ export async function findEmailsByCriteria(input: FindEmailsByCriteriaInput): Pr
   return findEmailsByCriteriaFlow(input);
 }
 
+const MAX_EMAILS_PER_DOMAIN_FROM_APOLLO = 5; // Max emails to fetch per domain from Apollo.io
+
 const identifyCompaniesAndSuggestEmailsPrompt = ai.definePrompt({
   name: 'identifyCompaniesAndSuggestEmailsPrompt',
   input: {schema: FindEmailsByCriteriaInputSchema},
@@ -43,29 +45,26 @@ const identifyCompaniesAndSuggestEmailsPrompt = ai.definePrompt({
       name: z.string().describe("The name of the identified company."),
       domain: z.string().describe("The primary website domain of the company (e.g., example.com)."),
       suggestedEmails: z.array(z.string()).describe("Email addresses (or strings that look like emails) directly suggested by the AI for this company based on public information or common patterns. These will undergo a basic format check.").default([]),
-    })).describe("A list of 5-10 diverse companies/organizations relevant to the search criteria. Prioritize companies for which email addresses are likely to be findable. For each, also suggest potential email addresses if possible."),
-    initialReasoning: z.string().optional().describe("Brief reasoning for selecting these companies and suggesting initial emails based on the search criteria."),
+    })).describe("An extensive and diverse list of companies/organizations relevant to the search criteria. For each, also suggest potential email addresses if possible."),
+    initialReasoning: z.string().optional().describe("Brief reasoning for selecting these companies and suggesting initial emails based on the search criteria, and strategy to meet the high volume target."),
   })},
-  prompt: `You are an expert research assistant. Your task is to identify companies relevant to the given search criteria and suggest potential email addresses for them.
-These companies will also be used to search for more emails using a tool like Apollo.io. The emails you suggest and those found by Apollo.io will undergo a basic format check.
+  prompt: 
+`You are an expert research assistant. Your primary goal is to generate a very large list of potential email contacts (aiming for 1000+ if the criteria allow) based on the given search criteria.
+You will achieve this by:
+1.  Identifying an extensive and diverse list of companies or organizations highly relevant to the search criteria. For each, provide its name and primary website domain (e.g., 'Google', 'google.com'). Focus on entities where business contact information is likely publicly discoverable.
+2.  For each identified company, directly suggest as many potential email addresses (or strings that look like email addresses) as reasonably possible. These can be generic (e.g., contact@, info@, sales@, support@, careers@, press@, media@) or based on common patterns if individual names are discoverable (e.g., firstname.lastname@domain.com, f.lastname@domain.com, firstinitial.lastname@domain.com).
+3.  Provide a brief 'initialReasoning' explaining your strategy for company selection and email suggestion to meet the high volume target.
 
 Search Criteria: {{{searchCriteria}}}
 
-Based on the search criteria, please:
-1.  Identify a list of 5 to 10 diverse companies or organizations that are highly relevant.
-    Focus on companies where business contact information (emails) is likely to be publicly discoverable.
-    For each company, provide its name and its primary website domain (e.g., 'Google', 'google.com').
-2.  For each identified company, if possible, directly suggest a few potential email addresses (or strings that look like email addresses). These could be generic (e.g., contact@, info@) or based on common patterns if individual names are discoverable (e.g., firstname.lastname@domain.com).
-3.  Provide a brief 'initialReasoning' explaining why these companies were chosen and how you approached suggesting emails.
-
-List the companies in the 'companies' array, each with 'name', 'domain', and 'suggestedEmails'. If no emails can be suggested for a company, return an empty array for 'suggestedEmails'.
-Your goal is to provide a broad starting point for contact discovery. Aim for a substantial number of contacts overall when combined with other tools, potentially well over 1000 if the criteria are broad. Think expansively, consider related and adjacent industries to maximize results if the initial criteria is too narrow. Clearly state in your reasoning if and how you broadened the search.
+List the companies in the 'companies' array, each with 'name', 'domain', and 'suggestedEmails'.
+The domains you provide will also be used to search for more emails using a tool like Apollo.io (which can find up to ${MAX_EMAILS_PER_DOMAIN_FROM_APOLLO} additional emails per domain). Therefore, the combination of your direct email suggestions AND the domains you list for Apollo.io search should contribute to achieving the 1000+ potential contact target.
+Think expansively: if the initial criteria are narrow, consider related and adjacent industries or roles to maximize results. Clearly state in your reasoning if and how you broadened the search.
 Include various types of publicly listed email addresses, such as generic company contacts, and emails of individuals associated with these companies if publicly available (e.g., on company websites, public professional directories, professional social media pages where emails are openly shared, relevant online forums, personal websites, or professional portfolios). Personal-style email addresses (e.g., from providers like Gmail, Outlook.com, Yahoo, etc.) should be included if they are publicly listed by individuals in direct relation to their professional activities, services, or public profile relevant to the search criteria.
-If you achieve a target of over 1000 potential contacts, please indicate this in your reasoning and describe the breadth of your search.
+If you believe you have provided enough company domains and direct email suggestions to potentially yield over 1000 contacts (considering the Apollo.io tool's contribution as well), please indicate this in your reasoning and describe the breadth of your search.
 `,
 });
 
-const MAX_EMAILS_PER_DOMAIN_FROM_APOLLO = 5; // Still useful to limit Apollo per domain if it's too noisy
 
 const findEmailsByCriteriaFlow = ai.defineFlow(
   {
@@ -115,6 +114,10 @@ const findEmailsByCriteriaFlow = ai.defineFlow(
         findApolloEmailsTool({ domain: company.domain, maxEmailsPerDomain: MAX_EMAILS_PER_DOMAIN_FROM_APOLLO })
           .catch(e => {
             console.error(`Critical error invoking findApolloEmailsTool for ${company.domain}:`, e);
+            apolloToolErrorCount++;
+            if (e instanceof Error && (e.message.toLowerCase().includes('api key') || e.message.toLowerCase().includes('unauthorized'))) {
+                apolloApiKeyIssueDetected = true;
+            }
             return { domain: company.domain, emails: [], error: `Tool invocation failed: ${e instanceof Error ? e.message : "Unknown tool error"}` } as FindApolloEmailsOutput;
           })
       );
@@ -151,17 +154,17 @@ const findEmailsByCriteriaFlow = ai.defineFlow(
       const combinedPotentialEmails = [...allPotentialEmailsFromAI, ...allPotentialEmailsFromApollo].filter(email => typeof email === 'string' && email.trim() !== '');
       
       if (combinedPotentialEmails.length === 0) {
-        reasoningSteps.push("No potential emails found from AI suggestions or Apollo.io to validate.");
+        reasoningSteps.push("No potential emails found from AI suggestions or Apollo.io to perform basic format check on.");
         return {
           emailAddresses: [],
           reasoning: reasoningSteps.join(' '),
         };
       }
       
-      const uniquePotentialEmails = Array.from(new Set(combinedPotentialEmails));
-      reasoningSteps.push(`Combined to ${uniquePotentialEmails.length} unique potential emails for basic format validation.`);
+      const uniquePotentialEmails = Array.from(new Set(combinedPotentialEmails.map(e => e.toLowerCase()))); // Standardize to lowercase to improve uniqueness
+      reasoningSteps.push(`Combined to ${uniquePotentialEmails.length} unique potential emails for basic format check.`);
 
-      // Step 3: Validate all unique emails using the basic validateEmailTool
+      // Step 3: Perform basic format check on all unique emails using the validateEmailTool
       const allFormatCheckedEmails: string[] = [];
       const validatedEmailResults: ValidateEmailOutput[] = [];
       const CHUNK_SIZE = 10; 
@@ -169,7 +172,7 @@ const findEmailsByCriteriaFlow = ai.defineFlow(
       for (let i = 0; i < uniquePotentialEmails.length; i += CHUNK_SIZE) {
         const chunk = uniquePotentialEmails.slice(i, i + CHUNK_SIZE);
         const validationPromises = chunk.map(email =>
-          validateEmailTool({ email })
+          validateEmailTool({ email }) // Basic format check
             .catch(e => {
               console.error(`Critical error during basic validateEmailTool call for ${email}:`, e);
               basicValidationToolError = true; 
@@ -184,30 +187,29 @@ const findEmailsByCriteriaFlow = ai.defineFlow(
           const chunkResults = await Promise.all(validationPromises);
           validatedEmailResults.push(...chunkResults);
         } catch (e) {
-          console.error('Error processing a chunk of email validations:', e);
+          console.error('Error processing a chunk of email basic format checks:', e);
           basicValidationToolError = true; 
         }
       }
       
       for (const result of validatedEmailResults) {
-        if (result.status === 'valid' && result.email) {
+        if (result.status === 'valid' && result.email) { // 'valid' from basic_format_ok
           allFormatCheckedEmails.push(result.email);
         } else if (result.status !== 'valid') { 
-          console.warn(`Basic email validation for ${result.email} resulted in status '${result.status}': ${result.sub_status}`);
+          console.warn(`Basic email format check for ${result.email} resulted in status '${result.status}': ${result.sub_status}`);
           if(result.status === 'error_tool_invocation_failed') basicValidationToolError = true;
         }
       }
       
       reasoningSteps.push(`Basic format check confirmed ${allFormatCheckedEmails.length} email(s) as having a valid-looking format.`);
+      if (basicValidationToolError) {
+          reasoningSteps.push(`Some emails encountered errors during the basic format check tool invocation. Please check server logs for details.`);
+      }
       reasoningSteps.push(`Displaying all ${allFormatCheckedEmails.length} email(s) with a valid-looking format.`);
 
 
-      if (basicValidationToolError) {
-          reasoningSteps.push(`Some emails encountered errors during the basic format validation tool invocation. Please check server logs for details.`);
-      }
-
       return {
-        emailAddresses: allFormatCheckedEmails, // Return all format-checked emails
+        emailAddresses: allFormatCheckedEmails, // Return all emails that passed basic format check
         reasoning: reasoningSteps.join(' '),
       };
 
