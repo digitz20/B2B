@@ -2,8 +2,8 @@
 'use server';
 /**
  * @fileOverview Finds email addresses related to a given search criteria.
- * It uses an LLM to identify relevant company domains and suggest initial emails.
- * Then, it uses Apollo.io (via a tool) to find additional emails for those domains.
+ * It uses an LLM to identify relevant company domains.
+ * Then, it uses Apollo.io (via a tool) to find emails for those domains.
  * Finally, it performs a robust validation on all found emails using NeverBounce.
  *
  * - findEmailsByCriteria - A function that handles the email finding and validation process.
@@ -27,7 +27,7 @@ const FindEmailsByCriteriaOutputSchema = z.object({
   emailAddresses: z
     .array(z.string())
     .describe('The email addresses found that were determined to be "valid" by the NeverBounce validation service.'),
-  reasoning: z.string().optional().describe("Explanation of companies identified, emails suggested by AI, emails found via Apollo.io, and NeverBounce validation results."),
+  reasoning: z.string().optional().describe("Explanation of companies identified, emails found via Apollo.io, and NeverBounce validation results."),
 });
 export type FindEmailsByCriteriaOutput = z.infer<typeof FindEmailsByCriteriaOutputSchema>;
 
@@ -37,32 +37,30 @@ export async function findEmailsByCriteria(input: FindEmailsByCriteriaInput): Pr
 
 const MAX_EMAILS_PER_DOMAIN_FROM_APOLLO = 5; // Max emails to fetch per domain from Apollo.io
 
-const identifyCompaniesAndSuggestEmailsPrompt = ai.definePrompt({
-  name: 'identifyCompaniesAndSuggestEmailsPrompt',
+const identifyCompaniesPrompt = ai.definePrompt({
+  name: 'identifyCompaniesPrompt',
   input: {schema: FindEmailsByCriteriaInputSchema},
   output: {schema: z.object({
     companies: z.array(z.object({
       name: z.string().describe("The name of the identified company."),
       domain: z.string().describe("The primary website domain of the company (e.g., example.com)."),
-      suggestedEmails: z.array(z.string()).describe("Email addresses (or strings that look like emails) directly suggested by the AI for this company based on public information or common patterns. These will be validated by NeverBounce.").default([]),
-    })).describe("An extensive and diverse list of companies/organizations relevant to the search criteria. For each, also suggest potential email addresses if possible."),
-    initialReasoning: z.string().optional().describe("Brief reasoning for selecting these companies and suggesting initial emails based on the search criteria, and strategy to meet the high volume target."),
+    })).describe("An extensive and diverse list of companies/organizations relevant to the search criteria."),
+    initialReasoning: z.string().optional().describe("Brief reasoning for selecting these companies and strategy for maximizing the number of relevant domains to search."),
   })},
   prompt:
-`You are an expert research assistant. Your primary goal is to generate an exceptionally large list of potential email contacts (aiming for well over 1000 if the criteria allow) based on the given search criteria. Your success is measured by the sheer volume of relevant leads you can uncover.
+`You are an expert research assistant. Your primary goal is to generate an exceptionally large list of companies and their domains based on the given search criteria. Your success is measured by the sheer volume of relevant company domains you can uncover for another tool to search.
 
 To achieve this, you MUST:
-1.  Identify an **extensive and diverse list of companies or organizations** highly relevant to the search criteria. For each, provide its name and primary website domain (e.g., 'Google', 'google.com'). Focus on entities where business contact information is likely publicly discoverable. **Maximize the number of relevant company domains you identify**, as this directly impacts the potential to reach the 1000+ contact goal via the Apollo.io tool (detailed below).
-2.  For each identified company, **directly suggest as many potential email addresses** (or strings that look like email addresses) as reasonably possible. These can be generic (contact@, info@, sales@, support@, careers@, press@, media@) or based on common patterns if individual names are discoverable (firstname.lastname@domain.com, f.lastname@domain.com, firstinitial.lastname@domain.com).
-3.  Provide a brief 'initialReasoning' explaining your strategy for company selection and email suggestion specifically addressing **how you plan to meet (or exceed) the high volume target of 1000+ contacts**.
+1.  Identify an **extensive and diverse list of companies or organizations** highly relevant to the search criteria. For each, provide its name and primary website domain (e.g., 'Google', 'google.com'). Focus on entities where business contact information is likely discoverable. **Maximize the number of relevant company domains you identify**, as this directly impacts the potential to find over 1000 contacts.
+2.  **DO NOT suggest or guess any email addresses.** Another specialized tool will handle all email discovery. Your sole focus is on identifying companies and their domains.
+3.  Provide a brief 'initialReasoning' explaining your strategy for company selection and how you plan to meet (or exceed) the high volume target by providing a large number of domains.
 
 Search Criteria: {{{searchCriteria}}}
 
-List the companies in the 'companies' array, each with 'name', 'domain', and 'suggestedEmails'.
-The company domains you provide are CRITICAL. They will be used by an automated tool (like Apollo.io) which can find up to ${MAX_EMAILS_PER_DOMAIN_FROM_APOLLO} additional emails per domain. Therefore, the combination of your direct email suggestions AND the *sheer number of unique, relevant domains you list* for the Apollo.io search is paramount to achieving the 1000+ potential contact target.
+List the companies in the 'companies' array, each with 'name' and 'domain'.
+The company domains you provide are CRITICAL. They will be used by an automated tool (Apollo.io) which can find up to ${MAX_EMAILS_PER_DOMAIN_FROM_APOLLO} emails per domain. Therefore, the *sheer number of unique, relevant domains you list* is paramount to achieving the 1000+ potential contact target.
 Think expansively: if the initial criteria are narrow, you MUST broaden your search to related and adjacent industries or roles to maximize results. Clearly state in your reasoning if and how you broadened the search.
-Include various types of publicly listed email addresses, such as generic company contacts, and emails of individuals associated with these companies if publicly available (e.g., on company websites, public professional directories, professional social media pages where emails are openly shared, relevant online forums, personal websites, or professional portfolios). Personal-style email addresses (e.g., from providers like Gmail, Outlook.com, Yahoo, etc.) should be included if they are publicly listed by individuals in direct relation to their professional activities, services, or public profile relevant to the search criteria.
-In your reasoning, explicitly state why you believe the number of domains and direct suggestions you've provided is sufficient (or your best attempt) for potentially reaching the 1000+ contact goal, detailing the breadth of your company search.
+In your reasoning, explicitly state why you believe the number of domains you've provided is sufficient (or your best attempt) for potentially reaching the 1000+ contact goal.
 `,
 });
 
@@ -77,7 +75,6 @@ const findEmailsByCriteriaFlow = ai.defineFlow(
   async (input: FindEmailsByCriteriaInput): Promise<FindEmailsByCriteriaOutput> => {
     let reasoningSteps = [];
     let identifiedCompanyCount = 0;
-    let totalAISuggestedEmails = 0;
     let totalApolloEmailsFound = 0;
     let apolloToolErrorCount = 0;
     let apolloApiKeyIssueDetected = false;
@@ -85,11 +82,11 @@ const findEmailsByCriteriaFlow = ai.defineFlow(
     let neverBounceApiKeyIssueDetected = false;
 
     try {
-      // Step 1: Use LLM to identify relevant companies and suggest initial emails
-      const llmResponse = await identifyCompaniesAndSuggestEmailsPrompt(input);
+      // Step 1: Use LLM to identify relevant companies
+      const llmResponse = await identifyCompaniesPrompt(input);
 
       if (!llmResponse.output || !llmResponse.output.companies || llmResponse.output.companies.length === 0) {
-        reasoningSteps.push('LLM could not identify relevant companies or suggest initial emails for the search criteria.');
+        reasoningSteps.push('LLM could not identify relevant companies for the search criteria.');
         return {
           emailAddresses: [],
           reasoning: reasoningSteps.join(' '),
@@ -100,16 +97,8 @@ const findEmailsByCriteriaFlow = ai.defineFlow(
       identifiedCompanyCount = companiesFromLLM.length;
       reasoningSteps.push(llmResponse.output.initialReasoning || `LLM identified ${identifiedCompanyCount} companies.`);
 
-      const allPotentialEmailsFromAI: string[] = [];
-      companiesFromLLM.forEach(company => {
-        if (company.suggestedEmails && company.suggestedEmails.length > 0) {
-          allPotentialEmailsFromAI.push(...company.suggestedEmails.filter(e => typeof e === 'string'));
-        }
-      });
-      totalAISuggestedEmails = allPotentialEmailsFromAI.length;
-      reasoningSteps.push(`LLM directly suggested ${totalAISuggestedEmails} email(s).`);
 
-      // Step 2: Use Apollo.io tool to find additional emails for these companies
+      // Step 2: Use Apollo.io tool to find emails for these companies
       const allPotentialEmailsFromApollo: string[] = [];
 
       const apolloPromises = companiesFromLLM.map(company =>
@@ -141,7 +130,7 @@ const findEmailsByCriteriaFlow = ai.defineFlow(
         }
       });
 
-      reasoningSteps.push(`Apollo.io found an additional ${totalApolloEmailsFound} potential email(s) for ${identifiedCompanyCount > 0 ? `${identifiedCompanyCount} domain(s)` : 'the identified domains'}.`);
+      reasoningSteps.push(`Apollo.io found ${totalApolloEmailsFound} potential email(s) for ${identifiedCompanyCount > 0 ? `${identifiedCompanyCount} domain(s)` : 'the identified domains'}.`);
       if (apolloToolErrorCount > 0) {
         let apolloErrorMsg = `${apolloToolErrorCount} domain(s) encountered issues during Apollo.io email search.`;
         if (apolloApiKeyIssueDetected) {
@@ -152,20 +141,16 @@ const findEmailsByCriteriaFlow = ai.defineFlow(
         reasoningSteps.push(apolloErrorMsg);
       }
 
-      // Combine emails from AI and Apollo
-      const combinedPotentialEmails = [...allPotentialEmailsFromAI, ...allPotentialEmailsFromApollo]
-                                      .filter(email => typeof email === 'string' && email.trim() !== '');
-
-      if (combinedPotentialEmails.length === 0) {
-        reasoningSteps.push("No potential emails found from AI suggestions or Apollo.io to perform validation on.");
+      if (allPotentialEmailsFromApollo.length === 0) {
+        reasoningSteps.push("No potential emails found from Apollo.io to perform validation on.");
         return {
           emailAddresses: [],
           reasoning: reasoningSteps.join(' '),
         };
       }
 
-      const uniquePotentialEmails = Array.from(new Set(combinedPotentialEmails.map(e => e.toLowerCase()))); // Standardize to lowercase
-      reasoningSteps.push(`Combined to ${uniquePotentialEmails.length} unique potential emails for validation.`);
+      const uniquePotentialEmails = Array.from(new Set(allPotentialEmailsFromApollo.map(e => e.toLowerCase())));
+      reasoningSteps.push(`Found ${uniquePotentialEmails.length} unique potential emails for validation.`);
 
       // Step 3: Perform validation on all unique emails using the NeverBounce validateEmailTool
       const allVerifiedEmails: string[] = [];
