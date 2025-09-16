@@ -4,7 +4,7 @@
  * @fileOverview Finds email addresses related to a given search criteria.
  * It uses an LLM to identify relevant company domains and suggest initial emails.
  * Then, it uses Apollo.io (via a tool) to find additional emails for those domains.
- * Finally, it performs a basic format check on all found emails.
+ * Finally, it performs a robust validation on all found emails using NeverBounce.
  *
  * - findEmailsByCriteria - A function that handles the email finding and validation process.
  * - FindEmailsByCriteriaInput - The input type for the findEmailsByCriteria function.
@@ -26,8 +26,8 @@ export type FindEmailsByCriteriaInput = z.infer<typeof FindEmailsByCriteriaInput
 const FindEmailsByCriteriaOutputSchema = z.object({
   emailAddresses: z
     .array(z.string())
-    .describe('The email addresses found after a basic format check. Each string should resemble an email format.'),
-  reasoning: z.string().optional().describe("Explanation of companies identified, emails suggested by AI, emails found via Apollo.io, and basic format check results."),
+    .describe('The email addresses found that were determined to be "valid" by the NeverBounce validation service.'),
+  reasoning: z.string().optional().describe("Explanation of companies identified, emails suggested by AI, emails found via Apollo.io, and NeverBounce validation results."),
 });
 export type FindEmailsByCriteriaOutput = z.infer<typeof FindEmailsByCriteriaOutputSchema>;
 
@@ -44,7 +44,7 @@ const identifyCompaniesAndSuggestEmailsPrompt = ai.definePrompt({
     companies: z.array(z.object({
       name: z.string().describe("The name of the identified company."),
       domain: z.string().describe("The primary website domain of the company (e.g., example.com)."),
-      suggestedEmails: z.array(z.string()).describe("Email addresses (or strings that look like emails) directly suggested by the AI for this company based on public information or common patterns. These will undergo a basic format check.").default([]),
+      suggestedEmails: z.array(z.string()).describe("Email addresses (or strings that look like emails) directly suggested by the AI for this company based on public information or common patterns. These will be validated by NeverBounce.").default([]),
     })).describe("An extensive and diverse list of companies/organizations relevant to the search criteria. For each, also suggest potential email addresses if possible."),
     initialReasoning: z.string().optional().describe("Brief reasoning for selecting these companies and suggesting initial emails based on the search criteria, and strategy to meet the high volume target."),
   })},
@@ -81,7 +81,8 @@ const findEmailsByCriteriaFlow = ai.defineFlow(
     let totalApolloEmailsFound = 0;
     let apolloToolErrorCount = 0;
     let apolloApiKeyIssueDetected = false;
-    let basicFormatCheckToolError = false;
+    let validationToolErrorCount = 0;
+    let neverBounceApiKeyIssueDetected = false;
 
     try {
       // Step 1: Use LLM to identify relevant companies and suggest initial emails
@@ -156,7 +157,7 @@ const findEmailsByCriteriaFlow = ai.defineFlow(
                                       .filter(email => typeof email === 'string' && email.trim() !== '');
 
       if (combinedPotentialEmails.length === 0) {
-        reasoningSteps.push("No potential emails found from AI suggestions or Apollo.io to perform basic format check on.");
+        reasoningSteps.push("No potential emails found from AI suggestions or Apollo.io to perform validation on.");
         return {
           emailAddresses: [],
           reasoning: reasoningSteps.join(' '),
@@ -164,20 +165,20 @@ const findEmailsByCriteriaFlow = ai.defineFlow(
       }
 
       const uniquePotentialEmails = Array.from(new Set(combinedPotentialEmails.map(e => e.toLowerCase()))); // Standardize to lowercase
-      reasoningSteps.push(`Combined to ${uniquePotentialEmails.length} unique potential emails for basic format check.`);
+      reasoningSteps.push(`Combined to ${uniquePotentialEmails.length} unique potential emails for validation.`);
 
-      // Step 3: Perform basic format check on all unique emails using the validateEmailTool
-      const allFormatCheckedEmails: string[] = [];
+      // Step 3: Perform validation on all unique emails using the NeverBounce validateEmailTool
+      const allVerifiedEmails: string[] = [];
       const validatedEmailResults: ValidateEmailOutput[] = [];
       const CHUNK_SIZE = 10;
 
       for (let i = 0; i < uniquePotentialEmails.length; i += CHUNK_SIZE) {
         const chunk = uniquePotentialEmails.slice(i, i + CHUNK_SIZE);
         const validationPromises = chunk.map(email =>
-          validateEmailTool({ email }) // Basic format check
+          validateEmailTool({ email })
             .catch(e => {
-              console.error(`Critical error during basic validateEmailTool call for ${email}:`, e);
-              basicFormatCheckToolError = true;
+              console.error(`Critical error during validateEmailTool call for ${email}:`, e);
+              validationToolErrorCount++;
               return {
                 email: email,
                 status: 'error_tool_invocation_failed',
@@ -189,29 +190,41 @@ const findEmailsByCriteriaFlow = ai.defineFlow(
           const chunkResults = await Promise.all(validationPromises);
           validatedEmailResults.push(...chunkResults);
         } catch (e) {
-          console.error('Error processing a chunk of email basic format checks:', e);
-          basicFormatCheckToolError = true;
+          console.error('Error processing a chunk of email validations:', e);
+          validationToolErrorCount++;
         }
       }
-
+      
+      let skippedOrFailedValidationCount = 0;
       for (const result of validatedEmailResults) {
         if (result.status === 'valid' && result.email) {
-          allFormatCheckedEmails.push(result.email);
-        } else if (result.status !== 'valid' && result.email) {
-          console.warn(`Basic email format check for ${result.email} resulted in status '${result.status}': ${result.sub_status}`);
-          if(result.status === 'error_tool_invocation_failed') basicFormatCheckToolError = true;
+          allVerifiedEmails.push(result.email);
+        } else {
+          skippedOrFailedValidationCount++;
+          if (result.status === 'error_api_key_missing') {
+            neverBounceApiKeyIssueDetected = true;
+          }
+          if (result.email) {
+             console.warn(`Email validation for ${result.email} resulted in status '${result.status}': ${result.sub_status}`);
+          }
         }
       }
 
-      reasoningSteps.push(`Basic format check confirmed ${allFormatCheckedEmails.length} email(s) as having a valid-looking format.`);
-      if (basicFormatCheckToolError) {
-          reasoningSteps.push(`Some emails encountered errors during the basic format check tool invocation. Please check server logs for details.`);
+      reasoningSteps.push(`NeverBounce validation confirmed ${allVerifiedEmails.length} email(s) as valid.`);
+      if (skippedOrFailedValidationCount > 0) {
+        let validationErrorMsg = `${skippedOrFailedValidationCount} email(s) were not 'valid'.`;
+        if (neverBounceApiKeyIssueDetected) {
+            validationErrorMsg += ` This may indicate a NeverBounce API key configuration problem (e.g., missing, invalid, or unauthorized key). Please verify NEVERBOUNCE_API_KEY in your .env file and check server logs.`;
+        } else {
+            validationErrorMsg += ` Reasons could include 'invalid', 'catchall', 'disposable', 'unknown', or API/tool errors. Check server logs for details.`;
+        }
+        reasoningSteps.push(validationErrorMsg);
       }
-      reasoningSteps.push(`Displaying all ${allFormatCheckedEmails.length} email(s) with a valid-looking format.`);
+      reasoningSteps.push(`Displaying all ${allVerifiedEmails.length} valid email(s).`);
 
 
       return {
-        emailAddresses: allFormatCheckedEmails,
+        emailAddresses: allVerifiedEmails,
         reasoning: reasoningSteps.join(' '),
       };
 

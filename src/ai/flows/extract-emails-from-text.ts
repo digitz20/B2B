@@ -1,9 +1,9 @@
 
 'use server';
 /**
- * @fileOverview Extracts email addresses from a given block of text and performs basic format validation.
+ * @fileOverview Extracts email addresses from a given block of text and performs validation using NeverBounce.
  *
- * - extractEmailsFromText - A function that handles the email extraction and basic validation process.
+ * - extractEmailsFromText - A function that handles the email extraction and validation process.
  * - ExtractEmailsFromTextInput - The input type for the extractEmailsFromText function.
  * - ExtractEmailsFromTextOutput - The return type for the extractEmailsFromText function.
  */
@@ -18,9 +18,9 @@ const ExtractEmailsFromTextInputSchema = z.object({
 export type ExtractEmailsFromTextInput = z.infer<typeof ExtractEmailsFromTextInputSchema>;
 
 const ExtractEmailsFromTextOutputSchema = z.object({
-  extractedEmails: z.array(z.string().describe("An email address extracted from the text that passed basic format validation.")).describe('A list of email addresses extracted from the input text that passed basic format validation.').default([]),
+  extractedEmails: z.array(z.string().describe("An email address extracted from the text that was determined to be 'valid' by the NeverBounce validation service.")).describe('A list of valid email addresses extracted and verified from the input text.').default([]),
   originalTextCharacterCount: z.number().describe('The total number of characters in the original input text block.'),
-  extractionSummary: z.string().describe('A brief summary of the extraction and basic validation process, e.g., "Extracted X email(s), Y passed basic format check, from a text of Z characters."'),
+  extractionSummary: z.string().describe('A brief summary of the extraction and validation process, e.g., "Extracted X email(s), Y were validated as \'valid\' by NeverBounce, from a text of Z characters."'),
 });
 export type ExtractEmailsFromTextOutput = z.infer<typeof ExtractEmailsFromTextOutputSchema>;
 
@@ -32,13 +32,13 @@ const extractEmailsPrompt = ai.definePrompt({
   name: 'extractEmailsFromTextPrompt',
   input: {schema: ExtractEmailsFromTextInputSchema},
   output: {schema: z.object({
-    extractedEmails: z.array(z.string()).describe('A list of email addresses found in the text. These will undergo a basic format check.').default([]),
+    extractedEmails: z.array(z.string()).describe('A list of email addresses found in the text. These will undergo validation by NeverBounce.').default([]),
     originalTextCharacterCount: z.number().optional().describe('The total number of characters in the original input text block.'),
-    extractionSummary: z.string().optional().describe('A brief summary of the initial extraction process before basic format check.'),
+    extractionSummary: z.string().optional().describe('A brief summary of the initial extraction process before validation.'),
   })},
   prompt: `You are an email extraction specialist.
 Your task is to meticulously parse the provided text block and identify all strings that appear to be email addresses.
-Return only strings that look like properly formatted email addresses. Do NOT pre-filter emails yourself at this stage; just find as many as possible. A basic format check will happen in a subsequent step.
+Return all strings that look like email addresses. A separate validation step will determine their deliverability.
 
 Input Text:
 {{{textBlock}}}
@@ -56,7 +56,7 @@ const extractEmailsFromTextFlow = ai.defineFlow(
     name: 'extractEmailsFromTextFlow',
     inputSchema: ExtractEmailsFromTextInputSchema,
     outputSchema: ExtractEmailsFromTextOutputSchema,
-    tools: [validateEmailTool], // validateEmailTool is now a basic checker
+    tools: [validateEmailTool],
   },
   async (input: ExtractEmailsFromTextInput): Promise<ExtractEmailsFromTextOutput> => {
     try {
@@ -88,8 +88,9 @@ const extractEmailsFromTextFlow = ai.defineFlow(
         };
       }
 
-      const formatCheckedEmails: string[] = [];
-      let basicValidationToolError = false;
+      const verifiedEmails: string[] = [];
+      let validationToolErrorCount = 0;
+      let neverBounceApiKeyIssueDetected = false;
       const validatedEmailResults: ValidateEmailOutput[] = [];
       const CHUNK_SIZE = 10; 
 
@@ -98,7 +99,8 @@ const extractEmailsFromTextFlow = ai.defineFlow(
         const validationPromises = chunk.map(email =>
           validateEmailTool({ email })
             .catch(e => {
-              console.error(`Critical error during basic validateEmailTool call for ${email}:`, e);
+              console.error(`Critical error during validateEmailTool call for ${email}:`, e);
+              validationToolErrorCount++;
               return {
                 email: email,
                 status: 'error_tool_invocation_failed',
@@ -111,27 +113,34 @@ const extractEmailsFromTextFlow = ai.defineFlow(
           validatedEmailResults.push(...chunkResults);
         } catch (e) {
           console.error('Error processing a chunk of email validations:', e);
-          basicValidationToolError = true;
+          validationToolErrorCount++;
         }
       }
 
       for (const result of validatedEmailResults) {
         if (result.status === 'valid' && result.email) {
-          formatCheckedEmails.push(result.email);
-        } else if (result.status === 'error_tool_invocation_failed') {
-          console.warn(`Email validation for ${result.email} resulted in status '${result.status}': ${result.sub_status}`);
-          basicValidationToolError = true;
+          verifiedEmails.push(result.email);
+        } else {
+            if (result.status === 'error_api_key_missing') {
+                neverBounceApiKeyIssueDetected = true;
+            }
+            if (result.email) {
+                console.warn(`Email validation for ${result.email} resulted in status '${result.status}': ${result.sub_status}`);
+            }
         }
       }
 
-      let finalSummary = `Initially extracted ${candidateEmails.length} email(s). After basic format check, ${formatCheckedEmails.length} email(s) were confirmed as having a valid-looking format. `;
+      let finalSummary = `Initially extracted ${candidateEmails.length} email(s). After validation, ${verifiedEmails.length} email(s) were confirmed as 'valid'. `;
       finalSummary += `Original text character count: ${charCount}. `;
-      if (basicValidationToolError) {
-          finalSummary += `Some emails may have encountered errors during the basic format validation tool invocation. Please check server logs. `;
+      if (neverBounceApiKeyIssueDetected) {
+          finalSummary += `Some validations may have failed due to a NeverBounce API key configuration problem. Please check your .env file and server logs. `;
+      } else if (validationToolErrorCount > 0) {
+          finalSummary += `Some emails may have encountered errors during the validation tool invocation. Please check server logs. `;
       }
 
+
       return {
-        extractedEmails: formatCheckedEmails,
+        extractedEmails: verifiedEmails,
         originalTextCharacterCount: charCount,
         extractionSummary: finalSummary,
       };
