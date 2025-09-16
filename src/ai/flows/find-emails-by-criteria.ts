@@ -2,7 +2,7 @@
 'use server';
 /**
  * @fileOverview Finds email addresses related to a given search criteria.
- * It uses an LLM to identify relevant companies and suggest emails.
+ * It uses an LLM to identify relevant companies and suggest generic emails.
  * It also uses Apollo.io (via a tool) to find additional emails for those domains.
  *
  * - findEmailsByCriteria - A function that handles the email finding process.
@@ -42,19 +42,21 @@ const identifyCompaniesAndSuggestEmailsPrompt = ai.definePrompt({
     companies: z.array(z.object({
       name: z.string().describe("The name of the identified company."),
       domain: z.string().describe("The primary website domain of the company (e.g., example.com)."),
-      suggestedEmails: z.array(z.string()).describe("A list of plausible email addresses suggested by the AI for this company. These are guesses and are not validated."),
-    })).describe("An extensive and diverse list of companies relevant to the search criteria, including AI-suggested email addresses."),
+      suggestedEmails: z.array(z.string()).describe("A list of plausible GENERIC, role-based email addresses suggested by the AI for this company (e.g., 'contact@', 'press@')."),
+    })).describe("An extensive and diverse list of companies relevant to the search criteria, including AI-suggested generic email addresses."),
     initialReasoning: z.string().optional().describe("Brief reasoning for selecting these companies and the strategy for suggesting emails."),
   })},
   prompt:
 `You are an expert research assistant. Your goal is to generate a large list of potential business contacts based on the given search criteria.
 
-To achieve this, you MUST:
+To achieve this, you MUST follow these instructions:
 1.  Identify an **extensive and diverse list of companies or organizations** highly relevant to the search criteria. For each, provide its name and primary website domain (e.g., 'Google', 'google.com').
-2.  For each company, **suggest potential email addresses**. Use common business patterns (e.g., 'contact@', 'press@', 'hello@', 'firstname.lastname@', 'firstinitial.lastname@').
-3.  Provide a brief 'initialReasoning' explaining your strategy for company selection and email suggestion.
+2.  For each company, **suggest potential GENERIC, ROLE-BASED email addresses only**.
+    -   **ALLOWED patterns:** 'contact@', 'press@', 'hello@', 'support@', 'info@', 'sales@', 'media@', 'team@'.
+    -   **STRICTLY FORBIDDEN patterns:** Do NOT generate emails based on people's names, such as 'firstname.lastname@' or 'firstinitial.lastname@'. You MUST NOT invent or guess people's names. Your suggestions should be for company roles or departments.
+3.  Provide a brief 'initialReasoning' explaining your strategy for company selection.
 
-Another tool, Apollo.io, will also search for emails for the domains you identify. Your combined efforts should yield a large number of potential contacts.
+Another tool, Apollo.io, will separately search for more specific, person-based emails for the domains you identify. Your task is to provide the domains and suggest only the generic emails as instructed.
 
 Search Criteria: {{{searchCriteria}}}
 
