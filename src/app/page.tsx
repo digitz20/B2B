@@ -5,7 +5,7 @@ import * as React from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import * as z from "zod";
-import { Briefcase, Search, Loader2, AlertCircle, Mail, ClipboardCopy, Copy, XCircle, FileText, Wand2, Video } from "lucide-react";
+import { Briefcase, Search, Loader2, AlertCircle, Mail, ClipboardCopy, Copy, XCircle, FileText, Wand2, Video, Globe } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -26,6 +26,7 @@ import { useToast } from "@/hooks/use-toast";
 import { findEmailsByCriteria, type FindEmailsByCriteriaOutput } from "@/ai/flows/find-emails-by-criteria";
 import { extractEmailsFromText, type ExtractEmailsFromTextOutput } from "@/ai/flows/extract-emails-from-text";
 import { generateEmailsFromNamesInText, type GenerateEmailsFromNamesInTextOutput } from "@/ai/flows/generate-emails-from-names-in-text";
+import { generateEmailsFromDomains, type GenerateEmailsFromDomainsOutput } from "@/ai/flows/generate-emails-from-domains";
 import { textToSpeech, type TextToSpeechOutput } from "@/ai/flows/text-to-speech-flow";
 
 
@@ -50,6 +51,13 @@ const generateEmailsFormSchema = z.object({
 });
 type GenerateEmailsFormValues = z.infer<typeof generateEmailsFormSchema>;
 
+const fromDomainsFormSchema = z.object({
+  textBlockDomains: z.string().min(1, { 
+    message: "Please enter at least one domain.",
+  }),
+});
+type FromDomainsFormValues = z.infer<typeof fromDomainsFormSchema>;
+
 const lipSyncFormSchema = z.object({
     textToSpeak: z.string().min(1, {
         message: "Please enter some text to generate audio from.",
@@ -57,7 +65,7 @@ const lipSyncFormSchema = z.object({
 });
 type LipSyncFormValues = z.infer<typeof lipSyncFormSchema>;
 
-type ActiveTab = "find" | "extract" | "generate" | "lipsync";
+type ActiveTab = "find" | "extract" | "generate" | "domains" | "lipsync";
 
 export default function ContactFinderAIPage() {
   const [activeTab, setActiveTab] = React.useState<ActiveTab>("find");
@@ -67,6 +75,7 @@ export default function ContactFinderAIPage() {
   const [findContactsResult, setFindContactsResult] = React.useState<FindEmailsByCriteriaOutput | null>(null);
   const [extractionResult, setExtractionResult] = React.useState<ExtractEmailsFromTextOutput | null>(null);
   const [generationResult, setGenerationResult] = React.useState<GenerateEmailsFromNamesInTextOutput | null>(null);
+  const [fromDomainsResult, setFromDomainsResult] = React.useState<GenerateEmailsFromDomainsOutput | null>(null);
   const [lipSyncResult, setLipSyncResult] = React.useState<TextToSpeechOutput | null>(null);
   const [uploadedVideoUrl, setUploadedVideoUrl] = React.useState<string | null>(null);
   
@@ -92,6 +101,13 @@ export default function ContactFinderAIPage() {
       textBlockGenerate: "",
     },
   });
+
+  const fromDomainsForm = useForm<FromDomainsFormValues>({
+    resolver: zodResolver(fromDomainsFormSchema),
+    defaultValues: {
+      textBlockDomains: "",
+    },
+  });
   
   const lipSyncForm = useForm<LipSyncFormValues>({
     resolver: zodResolver(lipSyncFormSchema),
@@ -103,6 +119,7 @@ export default function ContactFinderAIPage() {
   const searchCriteriaValue = findContactsForm.watch("searchCriteria");
   const textBlockExtractValue = extractEmailsForm.watch("textBlockExtract");
   const textBlockGenerateValue = generateEmailsForm.watch("textBlockGenerate");
+  const textBlockDomainsValue = fromDomainsForm.watch("textBlockDomains");
   const textToSpeakValue = lipSyncForm.watch("textToSpeak");
 
   async function onSubmitFindContacts(values: FindContactsFormValues) {
@@ -196,6 +213,38 @@ export default function ContactFinderAIPage() {
       toast({
         variant: "destructive",
         title: "Error Generating Emails",
+        description: errorMessage,
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function onSubmitFromDomains(values: FromDomainsFormValues) {
+    setIsLoading(true);
+    setError(null);
+    setFromDomainsResult(null);
+    try {
+      const result = await generateEmailsFromDomains({ textBlock: values.textBlockDomains });
+      setFromDomainsResult(result);
+      if (result.processedEmails.length === 0) {
+        toast({
+          title: "No Emails Found",
+          description: result.generationSummary || "Could not find any emails for the provided domains.",
+        });
+      } else {
+        toast({
+          title: "Emails Found!",
+          description: result.generationSummary || `Successfully found ${result.processedEmails.length} email address(es).`,
+        });
+      }
+    } catch (err) {
+      console.error("Error generating emails from domains:", err);
+      const errorMessage = err instanceof Error ? err.message : "An unexpected error occurred.";
+      setError(errorMessage);
+      toast({
+        variant: "destructive",
+        title: "Error From Domains",
         description: errorMessage,
       });
     } finally {
@@ -313,6 +362,12 @@ export default function ContactFinderAIPage() {
     setGenerationResult(null);
     setError(null);
   };
+
+  const handleClearFromDomains = () => {
+    fromDomainsForm.reset({ textBlockDomains: "" });
+    setFromDomainsResult(null);
+    setError(null);
+  };
   
   const handleClearLipSync = () => {
     lipSyncForm.reset({ textToSpeak: "" });
@@ -337,13 +392,18 @@ export default function ContactFinderAIPage() {
     setGenerationResult(null);
     setError(null);
   };
+
+  const handleClearFromDomainsResultsOnly = () => {
+    setFromDomainsResult(null);
+    setError(null);
+  };
   
   const handleClearLipSyncResultsOnly = () => {
     setLipSyncResult(null);
     setError(null);
   };
   
-  const renderEmailList = (emails: string[], listType: "found" | "extracted" | "generated") => {
+  const renderEmailList = (emails: string[], listType: "found" | "extracted" | "generated" | "domains") => {
     return (
       <ul className="space-y-3">
         {emails.map((email, index) => (
@@ -381,15 +441,18 @@ export default function ContactFinderAIPage() {
       </header>
 
       <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as ActiveTab)} className="w-full max-w-2xl">
-        <TabsList className="grid w-full grid-cols-4 mb-6">
+        <TabsList className="grid w-full grid-cols-5 mb-6">
           <TabsTrigger value="find">
-            <Search className="mr-2 h-5 w-5" /> Find Contacts
+            <Search className="mr-2 h-5 w-5" /> Find
           </TabsTrigger>
           <TabsTrigger value="extract">
-            <FileText className="mr-2 h-5 w-5" /> Extract Emails
+            <FileText className="mr-2 h-5 w-5" /> Extract
           </TabsTrigger>
           <TabsTrigger value="generate">
-            <Wand2 className="mr-2 h-5 w-5" /> Generate Guesses
+            <Wand2 className="mr-2 h-5 w-5" /> Guess
+          </TabsTrigger>
+          <TabsTrigger value="domains">
+            <Globe className="mr-2 h-5 w-5" /> From Domains
           </TabsTrigger>
           <TabsTrigger value="lipsync">
             <Video className="mr-2 h-5 w-5" /> Lip Sync
@@ -584,6 +647,64 @@ export default function ContactFinderAIPage() {
           </Card>
         </TabsContent>
         
+        <TabsContent value="domains">
+          <Card className="w-full shadow-xl">
+            <CardHeader>
+              <CardTitle className="text-2xl">Generate Emails from Domains</CardTitle>
+              <CardDescription>
+                Paste a list of company domains to find potential email addresses.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Form {...fromDomainsForm}>
+                <form onSubmit={fromDomainsForm.handleSubmit(onSubmitFromDomains)} className="space-y-6">
+                  <FormField
+                    control={fromDomainsForm.control}
+                    name="textBlockDomains"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel htmlFor="textBlockDomainsInput" className="text-base">Company Domains</FormLabel>
+                        <FormControl>
+                           <Textarea
+                            id="textBlockDomainsInput"
+                            placeholder="example.com&#10;uber.com&#10;google.com"
+                            {...field}
+                            className="text-base min-h-[150px] p-3"
+                            aria-label="List of company domains"
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <div className="flex flex-col sm:flex-row gap-3">
+                    <Button type="submit" className="w-full text-base py-3" disabled={isLoading}>
+                      {isLoading && activeTab === "domains" ? (
+                        <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                      ) : (
+                        <Globe className="mr-2 h-5 w-5" />
+                      )}
+                      Find Emails
+                    </Button>
+                     {(textBlockDomainsValue || fromDomainsResult || (error && activeTab === "domains")) && (
+                       <Button 
+                        type="button" 
+                        variant="outline" 
+                        className="w-full sm:w-auto text-base py-3" 
+                        onClick={handleClearFromDomains}
+                        disabled={isLoading && activeTab === "domains"}
+                      >
+                        <XCircle className="mr-2 h-5 w-5" />
+                        Clear All
+                      </Button>
+                    )}
+                  </div>
+                </form>
+              </Form>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
         <TabsContent value="lipsync">
           <Card className="w-full shadow-xl">
             <CardHeader>
@@ -820,6 +941,53 @@ export default function ContactFinderAIPage() {
         </Card>
       )}
       
+      {/* Results for From Domains */}
+      {activeTab === "domains" && fromDomainsResult && !isLoading && !error && (
+        <Card className="mt-8 w-full max-w-2xl shadow-xl">
+          <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+            <div className="flex-grow">
+              <CardTitle className="text-2xl">Found Emails</CardTitle>
+              {fromDomainsResult.generationSummary && (
+                <CardDescription className="italic text-sm pt-1">
+                  {fromDomainsResult.generationSummary}
+                </CardDescription>
+              )}
+            </div>
+            <div className="flex gap-2 mt-2 sm:mt-0 self-start sm:self-center">
+              {fromDomainsResult.processedEmails.length > 0 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleCopyAllEmails(fromDomainsResult.processedEmails)}
+                  aria-label="Copy all found email addresses"
+                >
+                  <Copy className="mr-2 h-4 w-4" />
+                  Copy All
+                </Button>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleClearFromDomainsResultsOnly}
+                aria-label="Clear results"
+              >
+                <XCircle className="mr-2 h-4 w-4" />
+                Clear Results
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {fromDomainsResult.processedEmails.length > 0 ? (
+              renderEmailList(fromDomainsResult.processedEmails, "domains")
+            ) : (
+              <p className="text-base text-center text-muted-foreground py-4">
+                No emails could be found for the provided domains.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       {/* Results for Lip Sync */}
       {activeTab === "lipsync" && (uploadedVideoUrl || lipSyncResult) && !isLoading && !error && (
         <Card className="mt-8 w-full max-w-2xl shadow-xl">
