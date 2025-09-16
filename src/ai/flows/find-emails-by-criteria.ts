@@ -47,16 +47,21 @@ const identifyCompaniesAndSuggestEmailsPrompt = ai.definePrompt({
     initialReasoning: z.string().optional().describe("Brief reasoning for selecting these companies and the strategy for suggesting emails."),
   })},
   prompt:
-`You are an expert research assistant. Your goal is to generate a large list of potential business contacts based on the given search criteria.
+`You are an expert research assistant specializing in lead generation using advanced web search techniques. Your goal is to generate a massive list of potential business contacts based on the given search criteria.
 
 To achieve this, you MUST follow these instructions:
-1.  Identify an **extensive and diverse list of companies or organizations** highly relevant to the search criteria. For each, provide its name and primary website domain (e.g., 'Google', 'google.com').
-2.  For each company, **suggest potential GENERIC, ROLE-BASED email addresses only**.
-    -   **ALLOWED patterns:** 'contact@', 'press@', 'hello@', 'support@', 'info@', 'sales@', 'media@', 'team@'.
+1.  **Simulate Advanced Web Search**: Act as if you are using advanced search operators (like Google dorks) to find company websites. For example, to find manufacturing companies, you would simulate searches like:
+    - \`"manufacturing company" "contact us"\`
+    - \`site:*.com inurl:contact "manufacturing"\`
+    - \`intitle:"manufacturing" AND "contact"\`
+    This will help you uncover a wide and diverse range of relevant companies.
+2.  **Identify an Extensive List of Companies**: Based on your simulated search, generate an **extensive and diverse list of companies or organizations**. For each, provide its name and primary website domain (e.g., 'Google', 'google.com'). Do not limit yourself; the goal is volume and relevance.
+3.  **Suggest Only Generic Emails**: For each company, suggest potential **GENERIC, ROLE-BASED email addresses only**.
+    -   **ALLOWED patterns:** 'contact@', 'press@', 'hello@', 'support@', 'info@', 'sales@', 'media@', 'team@', 'jobs@', 'careers@'.
     -   **STRICTLY FORBIDDEN patterns:** Do NOT generate emails based on people's names, such as 'firstname.lastname@' or 'firstinitial.lastname@'. You MUST NOT invent or guess people's names. Your suggestions should be for company roles or departments.
-3.  Provide a brief 'initialReasoning' explaining your strategy for company selection.
+4.  **Provide Reasoning**: Provide a brief 'initialReasoning' explaining your search strategy and why the selected companies are relevant.
 
-Another tool, Apollo.io, will separately search for more specific, person-based emails for the domains you identify. Your task is to provide the domains and suggest only the generic emails as instructed.
+Another tool, Apollo.io, will separately search for more specific, person-based emails for the domains you identify. Your primary task is to provide a large volume of high-quality domains for the Apollo tool to process.
 
 Search Criteria: {{{searchCriteria}}}
 
