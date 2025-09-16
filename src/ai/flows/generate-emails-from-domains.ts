@@ -1,7 +1,7 @@
 
 'use server';
 /**
- * @fileOverview Extracts domains from a block of text and finds potential email addresses for them.
+ * @fileOverview Extracts domains from a block of text containing websites/domains and finds potential email addresses for them.
  * It uses the Apollo.io tool to find contacts and also suggests generic emails.
  *
  * - generateEmailsFromDomains - A function that handles the email generation process.
@@ -14,7 +14,7 @@ import {z} from 'genkit';
 import { findApolloEmailsTool, type FindApolloEmailsOutput } from '@/ai/tools/find-apollo-emails-tool';
 
 const GenerateEmailsFromDomainsInputSchema = z.object({
-  textBlock: z.string().describe('A block of text containing company domains (e.g., uber.com, example.com).'),
+  textBlock: z.string().describe('A block of text containing company websites or domains (e.g., https://www.uber.com, example.com).'),
 });
 export type GenerateEmailsFromDomainsInput = z.infer<typeof GenerateEmailsFromDomainsInputSchema>;
 
@@ -36,8 +36,9 @@ const extractDomainsPrompt = ai.definePrompt({
   output: {schema: z.object({
     domains: z.array(z.string().describe("A domain name extracted from the text.")).describe("A list of unique domain names extracted from the input text.").default([]),
   })},
-  prompt: `You are an expert at parsing text to find company domain names.
+  prompt: `You are an expert at parsing text to find company domain names from website URLs or domains.
 From the provided text block, extract all unique, valid-looking top-level domain names (e.g., example.com, company.co.uk).
+For a URL like 'https://www.example.com/about', you should extract 'example.com'.
 Ignore any subdomains (like app.example.com) and return only the root domain.
 Return the list of unique domains in the 'domains' array.
 
@@ -66,10 +67,10 @@ const generateEmailsFromDomainsFlow = ai.defineFlow(
       if (domains.length === 0) {
         return {
           processedEmails: [],
-          generationSummary: 'No valid domain names were found in the provided text.',
+          generationSummary: 'No valid domain names could be extracted from the provided text.',
         };
       }
-      summarySteps.push(`Identified ${domains.length} unique domain(s) from the text.`);
+      summarySteps.push(`Extracted ${domains.length} unique domain(s) from the text.`);
 
       const allPotentialEmails: string[] = [];
 

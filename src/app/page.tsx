@@ -52,7 +52,7 @@ type GenerateEmailsFormValues = z.infer<typeof generateEmailsFormSchema>;
 
 const fromDomainsFormSchema = z.object({
   textBlockDomains: z.string().min(1, { 
-    message: "Please enter at least one domain.",
+    message: "Please enter at least one website.",
   }),
 });
 type FromDomainsFormValues = z.infer<typeof fromDomainsFormSchema>;
@@ -212,7 +212,7 @@ export default function ContactFinderAIPage() {
       if (result.processedEmails.length === 0) {
         toast({
           title: "No Emails Found",
-          description: result.generationSummary || "Could not find any emails for the provided domains.",
+          description: result.generationSummary || "Could not find any emails for the provided websites.",
         });
       } else {
         toast({
@@ -226,7 +226,7 @@ export default function ContactFinderAIPage() {
       setError(errorMessage);
       toast({
         variant: "destructive",
-        title: "Error From Domains",
+        title: "Error From Websites",
         description: errorMessage,
       });
     } finally {
@@ -366,7 +366,7 @@ export default function ContactFinderAIPage() {
             <Wand2 className="mr-2 h-5 w-5" /> Guess
           </TabsTrigger>
           <TabsTrigger value="domains">
-            <Globe className="mr-2 h-5 w-5" /> From Domains
+            <Globe className="mr-2 h-5 w-5" /> From Websites
           </TabsTrigger>
         </TabsList>
 
@@ -561,9 +561,9 @@ export default function ContactFinderAIPage() {
         <TabsContent value="domains">
           <Card className="w-full shadow-xl">
             <CardHeader>
-              <CardTitle className="text-2xl">Generate Emails from Domains</CardTitle>
+              <CardTitle className="text-2xl">Generate Emails from Websites</CardTitle>
               <CardDescription>
-                Paste a list of company domains to find potential email addresses.
+                Paste a list of websites to find potential email addresses.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -574,14 +574,14 @@ export default function ContactFinderAIPage() {
                     name="textBlockDomains"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel htmlFor="textBlockDomainsInput" className="text-base">Company Domains</FormLabel>
+                        <FormLabel htmlFor="textBlockDomainsInput" className="text-base">Websites</FormLabel>
                         <FormControl>
                            <Textarea
                             id="textBlockDomainsInput"
-                            placeholder="example.com&#10;uber.com&#10;google.com"
+                            placeholder="https://www.example.com&#10;https://www.uber.com"
                             {...field}
                             className="text-base min-h-[150px] p-3"
-                            aria-label="List of company domains"
+                            aria-label="List of company websites"
                           />
                         </FormControl>
                         <FormMessage />
@@ -819,7 +819,7 @@ export default function ContactFinderAIPage() {
               renderEmailList(fromDomainsResult.processedEmails, "domains")
             ) : (
               <p className="text-base text-center text-muted-foreground py-4">
-                No emails could be found for the provided domains.
+                No emails could be found for the provided websites.
               </p>
             )}
           </CardContent>
@@ -829,3 +829,5 @@ export default function ContactFinderAIPage() {
     </div>
   );
 }
+
+    
