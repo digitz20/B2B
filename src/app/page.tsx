@@ -5,7 +5,7 @@ import * as React from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import * as z from "zod";
-import { Briefcase, Search, Loader2, AlertCircle, Mail, ClipboardCopy, Copy, XCircle, FileText, Wand2, Video, Globe } from "lucide-react";
+import { Briefcase, Search, Loader2, AlertCircle, Mail, ClipboardCopy, Copy, XCircle, FileText, Wand2, Globe } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -27,7 +27,6 @@ import { findEmailsByCriteria, type FindEmailsByCriteriaOutput } from "@/ai/flow
 import { extractEmailsFromText, type ExtractEmailsFromTextOutput } from "@/ai/flows/extract-emails-from-text";
 import { generateEmailsFromNamesInText, type GenerateEmailsFromNamesInTextOutput } from "@/ai/flows/generate-emails-from-names-in-text";
 import { generateEmailsFromDomains, type GenerateEmailsFromDomainsOutput } from "@/ai/flows/generate-emails-from-domains";
-import { textToSpeech, type TextToSpeechOutput } from "@/ai/flows/text-to-speech-flow";
 
 
 const findContactsFormSchema = z.object({
@@ -58,14 +57,7 @@ const fromDomainsFormSchema = z.object({
 });
 type FromDomainsFormValues = z.infer<typeof fromDomainsFormSchema>;
 
-const lipSyncFormSchema = z.object({
-    textToSpeak: z.string().min(1, {
-        message: "Please enter some text to generate audio from.",
-    }),
-});
-type LipSyncFormValues = z.infer<typeof lipSyncFormSchema>;
-
-type ActiveTab = "find" | "extract" | "generate" | "domains" | "lipsync";
+type ActiveTab = "find" | "extract" | "generate" | "domains";
 
 export default function ContactFinderAIPage() {
   const [activeTab, setActiveTab] = React.useState<ActiveTab>("find");
@@ -76,8 +68,6 @@ export default function ContactFinderAIPage() {
   const [extractionResult, setExtractionResult] = React.useState<ExtractEmailsFromTextOutput | null>(null);
   const [generationResult, setGenerationResult] = React.useState<GenerateEmailsFromNamesInTextOutput | null>(null);
   const [fromDomainsResult, setFromDomainsResult] = React.useState<GenerateEmailsFromDomainsOutput | null>(null);
-  const [lipSyncResult, setLipSyncResult] = React.useState<TextToSpeechOutput | null>(null);
-  const [uploadedVideoUrl, setUploadedVideoUrl] = React.useState<string | null>(null);
   
   const { toast } = useToast();
 
@@ -108,19 +98,11 @@ export default function ContactFinderAIPage() {
       textBlockDomains: "",
     },
   });
-  
-  const lipSyncForm = useForm<LipSyncFormValues>({
-    resolver: zodResolver(lipSyncFormSchema),
-    defaultValues: {
-        textToSpeak: "",
-    },
-  });
 
   const searchCriteriaValue = findContactsForm.watch("searchCriteria");
   const textBlockExtractValue = extractEmailsForm.watch("textBlockExtract");
   const textBlockGenerateValue = generateEmailsForm.watch("textBlockGenerate");
   const textBlockDomainsValue = fromDomainsForm.watch("textBlockDomains");
-  const textToSpeakValue = lipSyncForm.watch("textToSpeak");
 
   async function onSubmitFindContacts(values: FindContactsFormValues) {
     setIsLoading(true);
@@ -252,60 +234,6 @@ export default function ContactFinderAIPage() {
     }
   }
 
-  async function onSubmitLipSync(values: LipSyncFormValues) {
-    if (!uploadedVideoUrl) {
-        toast({
-            variant: "destructive",
-            title: "No Video Uploaded",
-            description: "Please upload a video file first.",
-        });
-        return;
-    }
-    setIsLoading(true);
-    setError(null);
-    setLipSyncResult(null);
-    try {
-        const result = await textToSpeech({ textToSpeak: values.textToSpeak });
-        setLipSyncResult(result);
-        toast({
-            title: "Audio Generated!",
-            description: result.summary,
-        });
-    } catch (err) {
-        console.error("Error generating audio:", err);
-        const errorMessage = err instanceof Error ? err.message : "An unexpected error occurred.";
-        setError(errorMessage);
-        toast({
-            variant: "destructive",
-            title: "Error Generating Audio",
-            description: errorMessage,
-        });
-    } finally {
-        setIsLoading(false);
-    }
-  }
-
-  const handleVideoUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      if (file.size > 5 * 1024 * 1024) { // 5MB limit
-        toast({
-            variant: "destructive",
-            title: "File Too Large",
-            description: "Please upload a video file smaller than 5MB.",
-        });
-        return;
-      }
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        setUploadedVideoUrl(e.target?.result as string);
-        setLipSyncResult(null);
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
-
   const handleCopyEmail = (email: string) => {
     navigator.clipboard.writeText(email)
       .then(() => {
@@ -369,15 +297,6 @@ export default function ContactFinderAIPage() {
     setError(null);
   };
   
-  const handleClearLipSync = () => {
-    lipSyncForm.reset({ textToSpeak: "" });
-    setLipSyncResult(null);
-    setUploadedVideoUrl(null);
-    const fileInput = document.getElementById('videoUploadInput') as HTMLInputElement;
-    if (fileInput) fileInput.value = '';
-    setError(null);
-  };
-
   const handleClearFindResultsOnly = () => {
     setFindContactsResult(null);
     setError(null);
@@ -395,11 +314,6 @@ export default function ContactFinderAIPage() {
 
   const handleClearFromDomainsResultsOnly = () => {
     setFromDomainsResult(null);
-    setError(null);
-  };
-  
-  const handleClearLipSyncResultsOnly = () => {
-    setLipSyncResult(null);
     setError(null);
   };
   
@@ -441,7 +355,7 @@ export default function ContactFinderAIPage() {
       </header>
 
       <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as ActiveTab)} className="w-full max-w-2xl">
-        <TabsList className="grid w-full grid-cols-5 mb-6">
+        <TabsList className="grid w-full grid-cols-4 mb-6">
           <TabsTrigger value="find">
             <Search className="mr-2 h-5 w-5" /> Find
           </TabsTrigger>
@@ -453,9 +367,6 @@ export default function ContactFinderAIPage() {
           </TabsTrigger>
           <TabsTrigger value="domains">
             <Globe className="mr-2 h-5 w-5" /> From Domains
-          </TabsTrigger>
-          <TabsTrigger value="lipsync">
-            <Video className="mr-2 h-5 w-5" /> Lip Sync
           </TabsTrigger>
         </TabsList>
 
@@ -705,79 +616,6 @@ export default function ContactFinderAIPage() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="lipsync">
-          <Card className="w-full shadow-xl">
-            <CardHeader>
-              <CardTitle className="text-2xl">Lip Sync (Prototype)</CardTitle>
-              <CardDescription>
-                Upload a video, provide text, and the AI will generate speech audio. 
-                Full video lip-syncing is not yet supported.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Form {...lipSyncForm}>
-                <form onSubmit={lipSyncForm.handleSubmit(onSubmitLipSync)} className="space-y-6">
-                   <FormItem>
-                        <FormLabel htmlFor="videoUploadInput" className="text-base">1. Upload Video (Max 5MB)</FormLabel>
-                        <FormControl>
-                            <Input 
-                                id="videoUploadInput"
-                                type="file"
-                                accept="video/*"
-                                onChange={handleVideoUpload}
-                                className="text-base file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20"
-                                aria-label="Upload video file"
-                            />
-                        </FormControl>
-                        <FormMessage />
-                    </FormItem>
-
-                  <FormField
-                    control={lipSyncForm.control}
-                    name="textToSpeak"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel htmlFor="textToSpeakInput" className="text-base">2. Text to Generate</FormLabel>
-                        <FormControl>
-                           <Textarea
-                            id="textToSpeakInput"
-                            placeholder="Enter the text you want the AI to speak..."
-                            {...field}
-                            className="text-base min-h-[100px] p-3"
-                            aria-label="Text to generate audio from"
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                  <div className="flex flex-col sm:flex-row gap-3">
-                    <Button type="submit" className="w-full text-base py-3" disabled={isLoading || !uploadedVideoUrl}>
-                      {isLoading && activeTab === "lipsync" ? (
-                        <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                      ) : (
-                        <Video className="mr-2 h-5 w-5" />
-                      )}
-                      Generate Audio
-                    </Button>
-                     {(uploadedVideoUrl || textToSpeakValue || lipSyncResult || (error && activeTab === "lipsync")) && (
-                       <Button 
-                        type="button" 
-                        variant="outline" 
-                        className="w-full sm:w-auto text-base py-3" 
-                        onClick={handleClearLipSync}
-                        disabled={isLoading && activeTab === "lipsync"}
-                      >
-                        <XCircle className="mr-2 h-5 w-5" />
-                        Clear All
-                      </Button>
-                    )}
-                  </div>
-                </form>
-              </Form>
-            </CardContent>
-          </Card>
-        </TabsContent>
       </Tabs>
 
       {isLoading && (
@@ -988,45 +826,6 @@ export default function ContactFinderAIPage() {
         </Card>
       )}
 
-      {/* Results for Lip Sync */}
-      {activeTab === "lipsync" && (uploadedVideoUrl || lipSyncResult) && !isLoading && !error && (
-        <Card className="mt-8 w-full max-w-2xl shadow-xl">
-          <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
-            <div className="flex-grow">
-              <CardTitle className="text-2xl">Lip Sync Result</CardTitle>
-              <CardDescription className="italic text-sm pt-1">
-                Here is your uploaded video and the generated audio.
-              </CardDescription>
-            </div>
-             <Button
-                variant="outline"
-                size="sm"
-                onClick={handleClearLipSyncResultsOnly}
-                aria-label="Clear lip sync results"
-              >
-                <XCircle className="mr-2 h-4 w-4" />
-                Clear Result
-              </Button>
-          </CardHeader>
-          <CardContent>
-            {uploadedVideoUrl && (
-                <div>
-                    <h3 className="text-lg font-medium mb-2">Uploaded Video</h3>
-                    <video key={uploadedVideoUrl} controls src={uploadedVideoUrl} className="w-full rounded-md aspect-video bg-black"></video>
-                </div>
-            )}
-            {lipSyncResult?.audioDataUri && (
-                <div className="mt-6">
-                    <h3 className="text-lg font-medium mb-2">Generated Audio</h3>
-                    <audio controls src={lipSyncResult.audioDataUri} className="w-full"></audio>
-                    <p className="text-xs text-muted-foreground text-center pt-4">
-                        {lipSyncResult.summary}
-                    </p>
-                </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
     </div>
   );
 }
