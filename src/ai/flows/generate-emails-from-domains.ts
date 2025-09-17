@@ -30,7 +30,7 @@ const ScraperResponseSchema = z.object({
 export async function generateEmailsFromDomains(input: GenerateEmailsFromDomainsInput): Promise<GenerateEmailsFromDomainsOutput> {
   const customScraperUrl = 'https://emailscrapper-44wc.onrender.com/emailscrapper';
 
-  // 1. Parse the input text block to get an array of URLs
+  // 1. Parse the input text block to get an array of URLs, ensuring they start with http/https.
   const urls = input.textBlock.split(/\s+/).filter(line => line.trim().startsWith('http'));
 
   if (urls.length === 0) {
