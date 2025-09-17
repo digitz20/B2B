@@ -12,13 +12,13 @@ import {ai} from '@/ai/genkit';
 import {z} from 'genkit';
 
 const GenerateEmailsFromDomainsInputSchema = z.object({
-  textBlock: z.string().describe('A block of text containing company websites or domains (e.g., https://www.uber.com, example.com).'),
+  textBlock: z.string().describe('A block of text containing company websites or domains (e.g., uber.com, https://www.example.com).'),
 });
 export type GenerateEmailsFromDomainsInput = z.infer<typeof GenerateEmailsFromDomainsInputSchema>;
 
 const GenerateEmailsFromDomainsOutputSchema = z.object({
   processedEmails: z.array(z.string()).describe('A list of found email addresses from the scraper.'),
-  generationSummary: z.string().describe('A summary of the domains processed and the emails found.'),
+  generationSummary: z.string().describe('A summary of the websites processed and the emails found.'),
 });
 export type GenerateEmailsFromDomainsOutput = z.infer<typeof GenerateEmailsFromDomainsOutputSchema>;
 
@@ -32,13 +32,13 @@ const ScraperResponseSchema = z.array(ScraperResponseItemSchema).default([]);
 export async function generateEmailsFromDomains(input: GenerateEmailsFromDomainsInput): Promise<GenerateEmailsFromDomainsOutput> {
   const customScraperUrl = 'https://emailscrapper-44wc.onrender.com/emailscrapper';
 
-  // 1. Parse the input text block to get an array of URLs, ensuring they start with http/https.
-  const urls = input.textBlock.split(/\s+/).filter(line => line.trim().startsWith('http'));
+  // 1. Parse the input text block to get an array of websites.
+  const websites = input.textBlock.split(/\s+/).filter(line => line.trim() !== '');
 
-  if (urls.length === 0) {
+  if (websites.length === 0) {
     return {
       processedEmails: [],
-      generationSummary: 'No valid website URLs were provided. Please ensure each URL starts with http or https.',
+      generationSummary: 'No websites were provided. Please enter at least one website.',
     };
   }
 
@@ -49,7 +49,7 @@ export async function generateEmailsFromDomains(input: GenerateEmailsFromDomains
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ websites: urls }), // Send the object with the "websites" key
+      body: JSON.stringify({ websites: websites }), // Send the object with the "websites" key
     });
 
     if (!response.ok) {
@@ -72,7 +72,7 @@ export async function generateEmailsFromDomains(input: GenerateEmailsFromDomains
 
     return {
       processedEmails: uniqueEmails,
-      generationSummary: `Processed ${urls.length} website(s) and found ${uniqueEmails.length} unique email(s) via the custom scraper.`,
+      generationSummary: `Processed ${websites.length} website(s) and found ${uniqueEmails.length} unique email(s) via the custom scraper.`,
     };
 
   } catch (error) {
