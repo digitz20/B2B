@@ -30,6 +30,15 @@ const ScraperResponseItemSchema = z.object({
 const ScraperResponseSchema = z.array(ScraperResponseItemSchema).default([]);
 
 export async function generateEmailsFromDomains(input: GenerateEmailsFromDomainsInput): Promise<GenerateEmailsFromDomainsOutput> {
+  return generateEmailsFromDomainsFlow(input);
+}
+
+
+const generateEmailsFromDomainsFlow = ai.defineFlow({
+    name: 'generateEmailsFromDomainsFlow',
+    inputSchema: GenerateEmailsFromDomainsInputSchema,
+    outputSchema: GenerateEmailsFromDomainsOutputSchema,
+}, async (input: GenerateEmailsFromDomainsInput): Promise<GenerateEmailsFromDomainsOutput> => {
   const customScraperUrl = 'https://emailscrapper-44wc.onrender.com/emailscrapper';
 
   // 1. Parse the input text block to get an array of websites.
@@ -83,4 +92,5 @@ export async function generateEmailsFromDomains(input: GenerateEmailsFromDomains
       generationSummary: `A critical error occurred while contacting the email scraper service: ${errorMessage}`,
     };
   }
-}
+});
+
