@@ -23,7 +23,11 @@ const GenerateEmailsFromDomainsOutputSchema = z.object({
 export type GenerateEmailsFromDomainsOutput = z.infer<typeof GenerateEmailsFromDomainsOutputSchema>;
 
 // Define a schema for the expected response from the scraper service
-const ScraperResponseSchema = z.array(z.string()).default([]);
+const ScraperResponseItemSchema = z.object({
+  website: z.string(),
+  emails: z.array(z.string()).default([]),
+});
+const ScraperResponseSchema = z.array(ScraperResponseItemSchema).default([]);
 
 export async function generateEmailsFromDomains(input: GenerateEmailsFromDomainsInput): Promise<GenerateEmailsFromDomainsOutput> {
   const customScraperUrl = 'https://emailscrapper-44wc.onrender.com/emailscrapper';
@@ -45,7 +49,7 @@ export async function generateEmailsFromDomains(input: GenerateEmailsFromDomains
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(urls), // Send the array directly as the JSON payload
+      body: JSON.stringify({ websites: urls }), // Send the object with the "websites" key
     });
 
     if (!response.ok) {
@@ -62,8 +66,9 @@ export async function generateEmailsFromDomains(input: GenerateEmailsFromDomains
       throw new Error('Received an invalid response format from the email scraper service.');
     }
     
-    const emails = parsedData.data;
-    const uniqueEmails = Array.from(new Set(emails.map(e => e.toLowerCase())));
+    // 3. Extract and flatten all emails from the response
+    const allEmails = parsedData.data.flatMap(item => item.emails);
+    const uniqueEmails = Array.from(new Set(allEmails.map(e => e.toLowerCase())));
 
     return {
       processedEmails: uniqueEmails,
