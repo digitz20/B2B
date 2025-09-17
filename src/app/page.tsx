@@ -574,7 +574,7 @@ export default function ContactFinderAIPage() {
                     name="textBlockDomains"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel htmlFor="textBlockDomainsInput" className="text-base">Websites</FormLabel>
+                        <FormLabel htmlFor="textBlockDomainsInput" className="text-base">websites</FormLabel>
                         <FormControl>
                            <Textarea
                             id="textBlockDomainsInput"
